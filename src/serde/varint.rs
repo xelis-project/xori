@@ -8,7 +8,7 @@ use super::{Reader, ReaderError, Serializable, Writable, WriterError};
 /// - 0xFD + 2 bytes: u16 value (253-65535)
 /// - 0xFE + 4 bytes: u32 value (65536-4294967295)
 /// - 0xFF + 8 bytes: u64 value (4294967296+)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct VarInt(pub u64);
 
 impl VarInt {

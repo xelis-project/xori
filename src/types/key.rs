@@ -1,4 +1,4 @@
-use crate::{Reader, ReaderError, Serializable, Writable, WriterError};
+use crate::{Reader, ReaderError, Serializable, VarInt, Writable, WriterError};
 
 /// Key representation for entities, supporting both raw keys and indexed keys
 #[derive(Debug, Clone)]
@@ -9,7 +9,7 @@ pub enum Key<K: Serializable> {
 
 /// Key index for mapping raw keys to indexed keys
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct KeyIndex(pub(crate) u64);
+pub struct KeyIndex(pub(crate) VarInt);
 
 impl Serializable for KeyIndex {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
@@ -17,7 +17,7 @@ impl Serializable for KeyIndex {
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let value = u64::read(reader)?;
+        let value = VarInt::read(reader)?;
         Ok(KeyIndex(value))
     }
 
