@@ -67,7 +67,7 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
     }
 
     /// Map a raw key to either a raw key or an indexed key, depending on whether key indexing is enabled
-    async fn get_or_create_key<K: Serializable>(&self, key: K) -> Result<Key<K>, BackendError<B::Error>> {
+    async fn get_or_create_key<K: Serializable + Send + Sync>(&self, key: K) -> Result<Key<K>, BackendError<B::Error>> {
         match self.key_index_column {
             Some(index) => {
                 let id = self.engine.read::<_, KeyIndex>(index.key_to_id, &key).await
@@ -96,7 +96,7 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
 
     /// Get the key for a raw key, if key indexing is enabled
     /// Returns None only if key indexing is enabled but the key does not exist
-    async fn get_key<K: Serializable>(&self, key: K) -> Result<Option<Key<K>>, BackendError<B::Error>> {
+    async fn get_key<K: Serializable + Send + Sync>(&self, key: K) -> Result<Option<Key<K>>, BackendError<B::Error>> {
         match self.key_index_column {
             Some(index) => self.engine.read::<_, KeyIndex>(index.key_to_id, key).await
                 .map(|opt| opt.map(Key::Indexed)),
@@ -106,12 +106,12 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
 
     /// Get the latest version for the specified mapped key
     #[inline(always)]
-    async fn version<K: Serializable>(&self, key: &K) -> Result<Option<Version>, BackendError<B::Error>> {
+    async fn version<K: Serializable + Send + Sync>(&self, key: &K) -> Result<Option<Version>, BackendError<B::Error>> {
         self.engine.read(self.column, key).await
     }
 
     /// Get the latest version for the specified key, using the key index if available
-    pub async fn last_version<K: Serializable>(&self, key: &K) -> Result<Option<Version>, BackendError<B::Error>> {
+    pub async fn last_version<K: Serializable + Send + Sync>(&self, key: &K) -> Result<Option<Version>, BackendError<B::Error>> {
         match self.get_key(key).await? {
             Some(mapped_key) => self.version(&mapped_key).await,
             None => Ok(None),
@@ -119,12 +119,12 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
     }
 
     /// Update the latest version for a key
-    async fn update_version<K: Serializable>(&self, key: &K, version: Version) -> Result<(), BackendError<B::Error>> {
+    async fn update_version<K: Serializable + Send + Sync>(&self, key: &K, version: Version) -> Result<(), BackendError<B::Error>> {
         self.engine.write(self.column, key, &version).await
     }
 
     /// Store a new version of the entity for the given key
-    pub async fn store<K: Serializable>(&self, key: K, value: E) -> Result<(), BackendError<B::Error>> {
+    pub async fn store<K: Serializable + Send + Sync>(&self, key: K, value: E) -> Result<(), BackendError<B::Error>> {
         // Map the key if required
         let key = self.get_or_create_key::<K>(key).await?;
 
@@ -146,7 +146,7 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
 
     /// Delete versions at or above the specified version for the given key
     /// This is used for rolling back to a previous version by deleting all newer versions
-    pub async fn delete_until_version<K: Serializable>(&self, key: &K, version: Version) -> Result<(), BackendError<B::Error>> {
+    pub async fn delete_until_version<K: Serializable + Send + Sync>(&self, key: &K, version: Version) -> Result<(), BackendError<B::Error>> {
         match self.get_key(key).await? {
             Some(mapped_key) => {
                 let Some(last_version) = self.version(&mapped_key).await? else {
@@ -191,7 +191,7 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
     }
 
     /// Read a specific version of the entity for the given key
-    pub async fn read_at_version<K: Serializable>(&self, key: &K, version: Version) -> Result<Option<E>, BackendError<B::Error>> {
+    pub async fn read_at_version<K: Serializable + Send + Sync>(&self, key: &K, version: Version) -> Result<Option<E>, BackendError<B::Error>> {
         Ok(match self.get_key(key).await? {
             Some(mapped_key) => {
                 let versioned_key = VersionedEntry {
@@ -206,7 +206,7 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
     }
 
     /// Get the entire history of versions for a given key as a stream of (value, version) pairs, starting from the latest version and going backwards
-    pub async fn history<'a, K: Serializable>(&'a self, key: &'a K) -> Result<impl Stream<Item = Result<(E, Version), BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
+    pub async fn history<'a, K: Serializable + Send + Sync>(&'a self, key: &'a K) -> Result<impl Stream<Item = Result<(E, Version), BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
         Ok(stream::unfold(
             match self.get_key(key).await? {
                 Some(mapped_key) => self.version(&mapped_key).await?
@@ -234,7 +234,7 @@ impl<E: Entity, B: Backend> EntityHandle<E, B> {
     }
 
     /// Perform a binary search over the versions for a given key, using the provided comparison function to determine the direction of the search
-    pub async fn binary_search_with_bias<K: Serializable>(
+    pub async fn binary_search_with_bias<K: Serializable + Send + Sync>(
         &self,
         key: &K,
         top_version: Version,

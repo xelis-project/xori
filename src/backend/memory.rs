@@ -32,7 +32,6 @@ impl MemoryBackend {
     }
 }
 
-// #[async_trait::async_trait]
 impl Backend for MemoryBackend {
     type Error = std::convert::Infallible;
     type RawBytes = Vec<u8>;

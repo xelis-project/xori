@@ -62,29 +62,29 @@ pub trait Backend {
     type RawBytes: AsRef<[u8]>;
 
     /// Open a column/namespace for use (e.g., for an entity type)
-    async fn open_column<C: AsRef<[u8]>>(&self, column: C) -> Result<(), Self::Error>;
+    fn open_column<C: AsRef<[u8]> + Send>(&self, column: C) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Write data to the database
-    async fn write<K: Serializable, V: Serializable>(&self, column: Column, key: K, data: V) -> Result<(), Self::Error>;
+    fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: Column, key: K, data: V) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Read data at the latest version
-    async fn read<K: Serializable>(&self, column: Column, key: K) -> Result<Option<Self::RawBytes>, Self::Error>;
+    fn read<K: Serializable + Send + Sync>(&self, column: Column, key: K) -> impl Future<Output = Result<Option<Self::RawBytes>, Self::Error>> + Send;
 
     /// Get all historical entries for a key (entire history)
-    async fn iterator_prefix<P: Serializable>(&self, column: Column, prefix: P) -> Result<impl Stream<Item = Result<(Self::RawBytes, Self::RawBytes), Self::Error>>, Self::Error>;
+    fn iterator_prefix<P: Serializable + Send>(&self, column: Column, prefix: P) -> impl Future<Output = Result<impl Stream<Item = Result<(Self::RawBytes, Self::RawBytes), Self::Error>>, Self::Error>> + Send;
 
     /// Delete a key entirely
-    async fn delete<K: Serializable>(&self, column: Column, key: K) -> Result<(), Self::Error>;
+    fn delete<K: Serializable + Send + Sync>(&self, column: Column, key: K) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Check if a key exists at current version
-    async fn exists<K: Serializable>(&self, column: Column, key: K) -> Result<bool, Self::Error>;
+    fn exists<K: Serializable + Send + Sync>(&self, column: Column, key: K) -> impl Future<Output = Result<bool, Self::Error>> + Send;
 
     /// Get all keys in a column
-    async fn list_keys<'a>(&'a self, column: Column) -> Result<impl Stream<Item = Result<Self::RawBytes, Self::Error>> + 'a, Self::Error>;
+    fn list_keys<'a>(&'a self, column: Column) -> impl Future<Output = Result<impl Stream<Item = Result<Self::RawBytes, Self::Error>> + 'a, Self::Error>> + Send + 'a;
 
     /// Clear all data (careful operation)
-    async fn clear(&self) -> Result<(), Self::Error>;
+    fn clear(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 
     /// Flush any pending writes to the storage medium
-    async fn flush(&self) -> Result<(), Self::Error>;
+    fn flush(&self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }

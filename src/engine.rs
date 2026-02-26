@@ -97,7 +97,7 @@ impl<B: Backend> XoriEngine<B> {
 
     /// Read a value from the backend for a given column and key
     #[inline]
-    pub async fn read<K: Serializable, V: Serializable>(&self, column: Column, key: K) -> Result<Option<V>, BackendError<B::Error>> {
+    pub async fn read<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: Column, key: K) -> Result<Option<V>, BackendError<B::Error>> {
         self.backend.read(column, key).await
             .and_then(|bytes| bytes
                     .map(|bytes| V::from_bytes(bytes.as_ref())
@@ -109,13 +109,13 @@ impl<B: Backend> XoriEngine<B> {
 
     /// Write a value to the backend for a given column and key
     #[inline]
-    pub async fn write<K: Serializable, V: Serializable>(&self, column: Column, key: K, value: V) -> Result<(), BackendError<B::Error>> {
+    pub async fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: Column, key: K, value: V) -> Result<(), BackendError<B::Error>> {
         self.backend.write(column, key, value).await
             .map_err(BackendError::Backend)
     }
 
     /// Iterate over all entries with keys that start with the given prefix
-    pub async fn iterator_prefix<'a, P: Serializable + 'a, K: Serializable, V: Serializable>(&'a self, column: Column, prefix: P) -> Result<impl Stream<Item = Result<(K, V), BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
+    pub async fn iterator_prefix<'a, P: Serializable + Send + Sync + 'a, K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&'a self, column: Column, prefix: P) -> Result<impl Stream<Item = Result<(K, V), BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
         match self.backend.iterator_prefix(column, prefix).await {
             Ok(stream) => Ok(stream.map(|item| match item {
                 Ok((key, value)) => {
@@ -130,7 +130,7 @@ impl<B: Backend> XoriEngine<B> {
     }
 
     /// List all keys in a column
-    pub async fn list_keys<'a, K: Serializable + 'a>(&'a self, column: Column) -> Result<impl Stream<Item = Result<K, BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
+    pub async fn list_keys<'a, K: Serializable + Send + Sync + 'a>(&'a self, column: Column) -> Result<impl Stream<Item = Result<K, BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
         match self.backend.list_keys(column).await {
             Ok(stream) => Ok(stream.map(|item| match item {
                 Ok(key) => K::from_bytes(key).map_err(BackendError::from),
@@ -141,7 +141,7 @@ impl<B: Backend> XoriEngine<B> {
     }
 
     /// Delete a key from the backend for a given column
-    pub async fn delete<K: Serializable>(&self, column: Column, key: K) -> Result<(), BackendError<B::Error>> {
+    pub async fn delete<K: Serializable + Send + Sync>(&self, column: Column, key: K) -> Result<(), BackendError<B::Error>> {
         self.backend.delete(column, key).await
             .map_err(BackendError::Backend)
     }
