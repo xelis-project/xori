@@ -115,7 +115,7 @@ impl<T: Serializable> Serializable for Option<T> {
 impl<T: Serializable> Serializable for Vec<T> {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         // Write length as VarInt
-        VarInt(self.len()).write(writer)?;
+        VarInt(self.len() as u64).write(writer)?;
 
         // Write each element
         for item in self {
@@ -130,7 +130,7 @@ impl<T: Serializable> Serializable for Vec<T> {
         let len = VarInt::read(reader)?.value();
 
         // Pre-allocate vector
-        let mut vec = Vec::with_capacity(len.min(1024)); // Cap allocation for safety
+        let mut vec = Vec::with_capacity(len.min(1024) as usize); // Cap allocation for safety
 
         // Read each element
         for _ in 0..len {

@@ -9,18 +9,18 @@ use super::{Reader, ReaderError, Serializable, Writable, WriterError};
 /// - 0xFE + 4 bytes: u32 value (65536-4294967295)
 /// - 0xFF + 8 bytes: u64 value (4294967296+)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct VarInt(pub usize);
+pub struct VarInt(pub u64);
 
 impl VarInt {
     /// Create a new VarInt from a usize value
     #[inline]
-    pub const fn new(value: usize) -> Self {
+    pub const fn new(value: u64) -> Self {
         Self(value)
     }
 
-    /// Get the inner usize value
+    /// Get the inner u64 value
     #[inline]
-    pub const fn value(&self) -> usize {
+    pub const fn value(&self) -> u64 {
         self.0
     }
 
@@ -41,13 +41,13 @@ impl VarInt {
 
 impl From<usize> for VarInt {
     fn from(value: usize) -> Self {
-        Self(value)
+        Self(value as u64)
     }
 }
 
 impl From<VarInt> for usize {
     fn from(varint: VarInt) -> Self {
-        varint.0
+        varint.0 as usize
     }
 }
 
@@ -78,15 +78,15 @@ impl Serializable for VarInt {
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let prefix = reader.next_byte()?;
         match prefix {
-            0x00..=0xFC => Ok(Self(prefix as usize)),
-            0xFD => u16::read(reader).map(|v| Self(v as usize)),
-            0xFE => u32::read(reader).map(|v| Self(v as usize)),
-            0xFF => u64::read(reader).map(|v| Self(v as usize)),
+            0x00..=0xFC => Ok(Self(prefix as u64)),
+            0xFD => u16::read(reader).map(|v| Self(v as u64)),
+            0xFE => u32::read(reader).map(|v| Self(v as u64)),
+            0xFF => u64::read(reader).map(Self),
         }
     }
 
     fn size(&self) -> usize {
-        Self::encoded_size(self.0)
+        Self::encoded_size(self.0 as usize)
     }
 }
 
@@ -132,7 +132,7 @@ mod tests {
 
     #[test]
     fn test_varint_eight_bytes() {
-        for value in [0x100000000usize, 0xFFFFFFFFFFFFFFFF] {
+        for value in [0x100000000u64, 0xFFFFFFFFFFFFFFFFu64] {
             let varint = VarInt(value);
             let bytes = varint.to_bytes().unwrap();
             assert_eq!(bytes.len(), 9); // prefix + 8 bytes
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn test_varint_size_matches_serialized() {
-        for value in [0, 1, 252, 253, 1000, 65535, 65536, 1000000, 0x100000000usize] {
+        for value in [0, 1, 252, 253, 1000, 65535, 65536, 1000000, 0x100000000u64, 0xFFFFFFFFFFFFFFFFu64] {
             let varint = VarInt(value);
             let size = varint.size();
             let bytes = varint.to_bytes().unwrap();
