@@ -1,121 +1,49 @@
-use dashmap::DashMap;
+mod error;
+
 use futures::{Stream, StreamExt};
 
-use crate::{BackendError, Result, Serializable};
-use crate::backend::{Backend, Column, ColumnKind};
-use crate::entity::{Entity, EntityHandle, KeyIndexColumn};
-use std::sync::Arc;
+use crate::builder::EntityInfo;
+use crate::{BackendError, EntityReadHandle, Serializable};
+use crate::backend::{Backend, Column};
+use crate::entity::{Entity, EntityWriteHandle};
+use std::collections::HashMap;
 
-/// The main Xori database engine wrapped in Arc for use in EntityHandle
-pub struct XoriEngine<B: Backend> {
-    backend: Arc<B>,
-    entity_registry: DashMap<&'static str, Column>,
+pub use error::{XoriError, Result};
+
+/// The main Xori database engine wrapper around the backend and entity registry
+pub struct XoriBackend<B: Backend> {
+    pub(crate) backend: B,
 }
 
-pub struct EntityConfig {
-    pub key_indexing: bool,
-}
-
-impl<B: Backend> XoriEngine<B> {
-    /// Create a new Xori engine with the given backend
-    #[inline]
-    pub fn new(backend: Arc<B>) -> Arc<Self> {
-        Arc::new(Self {
-            backend,
-            entity_registry: DashMap::new(),
-        })
-    }
-
-    /// Register an entity type and get a handle for it
-    #[inline]
-    pub async fn register<E: Entity>(self: &Arc<Self>, config: EntityConfig) -> Result<EntityHandle<E, B>, B::Error> {
-        if self.entity_registry.contains_key(E::entity_name()) {
-            return Err(BackendError::ColumnAlreadyRegistered);
-        }
-
-        self.backend.open_column(E::entity_name()).await?;
-        let column = Column {
-            id: self.entity_registry.len() as u32,
-            kind: ColumnKind::Entity, 
-        };
-
-        self.entity_registry.insert(E::entity_name(), column.clone());
-
-        let key_index_column = if config.key_indexing {
-            let key_to_id = Column {
-                id: self.entity_registry.len() as u32,
-                kind: ColumnKind::Index,
-            };
-            self.backend.open_column(format!("{}:ki", E::entity_name())).await?;
-
-            let id_to_key = Column {
-                id: self.entity_registry.len() as u32,
-                kind: ColumnKind::Index,
-            };
-            self.backend.open_column(format!("{}:ik", E::entity_name())).await?;
-
-            Some(KeyIndexColumn {
-                key_to_id,
-                id_to_key,
-            })
-        } else {
-            None
-        };
-
-        Ok(EntityHandle {
-            column,
-            key_index_column,
-            engine: Arc::clone(&self),
-            _phantom: std::marker::PhantomData,
-        })
-    }
-
-    /// Get a handle for a previously registered entity type
-    #[inline]
-    pub fn entity<E: Entity>(self: &Arc<Self>) -> Option<EntityHandle<E, B>> {
-        self.entity_registry
-            .get(E::entity_name())
-            .map(|column| EntityHandle {
-                column: column.value().clone(),
-                key_index_column: None,
-                engine: Arc::clone(&self),
-                _phantom: std::marker::PhantomData,
-            })
-    }
-
-    /// Check if an entity type is registered
-    #[inline]
-    pub fn is_registered(&self, entity_type: &str) -> bool {
-        self.entity_registry.contains_key(entity_type)
-    }
-    
+impl<B: Backend> XoriBackend<B> {
     /// Clear all data from the database
     #[inline]
-    pub async fn clear(&self) -> Result<(), B::Error> {
+    pub async fn clear(&mut self) -> Result<(), B::Error> {
         self.backend.clear().await
+            .map_err(XoriError::Backend)
     }
 
     /// Read a value from the backend for a given column and key
     #[inline]
-    pub async fn read<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: Column, key: K) -> Result<Option<V>, BackendError<B::Error>> {
+    pub async fn read<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: &Column, key: K) -> Result<Option<V>, B::Error> {
         self.backend.read(column, key).await
             .and_then(|bytes| bytes
                     .map(|bytes| V::from_bytes(bytes.as_ref())
                         .map_err(BackendError::from)
                     ).transpose()
                 )
-            .map_err(BackendError::Backend)
+                .map_err(XoriError::Backend)
     }
 
     /// Write a value to the backend for a given column and key
     #[inline]
-    pub async fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: Column, key: K, value: V) -> Result<(), BackendError<B::Error>> {
+    pub async fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&mut self, column: &Column, key: K, value: V) -> Result<(), B::Error> {
         self.backend.write(column, key, value).await
-            .map_err(BackendError::Backend)
+            .map_err(XoriError::Backend)
     }
 
     /// Iterate over all entries with keys that start with the given prefix
-    pub async fn iterator_prefix<'a, P: Serializable + Send + Sync + 'a, K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&'a self, column: Column, prefix: P) -> Result<impl Stream<Item = Result<(K, V), BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
+    pub async fn iterator_prefix<'a, P: Serializable + Send + Sync + 'a, K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&'a self, column: &'a Column, prefix: P) -> Result<impl Stream<Item = Result<(K, V), B::Error>> + 'a, B::Error> {
         match self.backend.iterator_prefix(column, prefix).await {
             Ok(stream) => Ok(stream.map(|item| match item {
                 Ok((key, value)) => {
@@ -123,26 +51,70 @@ impl<B: Backend> XoriEngine<B> {
                     let value = V::from_bytes(value)?;
                     Ok((key, value))
                 },
-                Err(e) => Err(BackendError::Backend(e)),
+                Err(e) => Err(XoriError::Backend(e)),
             })),
-            Err(e) => Err(BackendError::Backend(e)),
+            Err(e) => Err(XoriError::Backend(e)),
         }
     }
 
     /// List all keys in a column
-    pub async fn list_keys<'a, K: Serializable + Send + Sync + 'a>(&'a self, column: Column) -> Result<impl Stream<Item = Result<K, BackendError<B::Error>>> + 'a, BackendError<B::Error>> {
+    pub async fn list_keys<'a, K: Serializable + Send + Sync + 'a>(&'a self, column: &'a Column) -> Result<impl Stream<Item = Result<K, B::Error>> + 'a, B::Error> {
         match self.backend.list_keys(column).await {
             Ok(stream) => Ok(stream.map(|item| match item {
-                Ok(key) => K::from_bytes(key).map_err(BackendError::from),
-                Err(e) => Err(BackendError::Backend(e)),
+                Ok(key) => K::from_bytes(key).map_err(XoriError::from),
+                Err(e) => Err(XoriError::Backend(e)),
             })),
-            Err(e) => Err(BackendError::Backend(e)),
+            Err(e) => Err(XoriError::Backend(e)),
         }
     }
 
     /// Delete a key from the backend for a given column
-    pub async fn delete<K: Serializable + Send + Sync>(&self, column: Column, key: K) -> Result<(), BackendError<B::Error>> {
+    pub async fn delete<K: Serializable + Send + Sync>(&mut self, column: &Column, key: K) -> Result<(), B::Error> {
         self.backend.delete(column, key).await
-            .map_err(BackendError::Backend)
+            .map_err(XoriError::Backend)
+    }
+}
+
+/// The main Xori database engine wrapped in Arc for use in EntityHandle
+pub struct XoriEngine<B: Backend> {
+    pub(crate) backend: XoriBackend<B>,
+    pub(crate) entity_registry: HashMap<&'static str, EntityInfo>,
+}
+
+impl<B: Backend> XoriEngine<B> {
+    /// Get a handle for a previously registered entity type
+    #[inline]
+    pub fn entity_handle_read<'a, E: Entity>(&'a self) -> Option<EntityReadHandle<'a, E, B>> {
+        self.entity_registry
+            .get(E::entity_name())
+            .map(|info| EntityReadHandle {
+                info,
+                backend: &self.backend,
+                _phantom: std::marker::PhantomData,
+            })
+    }
+
+    /// Get a mutable handle for a previously registered entity type
+    #[inline]
+    pub fn entity_handle_write<'a, E: Entity>(&'a mut self) -> Option<EntityWriteHandle<'a, E, B>> {
+        self.entity_registry
+            .get(E::entity_name())
+            .map(|info| EntityWriteHandle {
+                info,
+                backend: &mut self.backend,
+                _phantom: std::marker::PhantomData,
+            })
+    }
+
+    /// Get a reference to the backend for advanced operations
+    #[inline(always)]
+    pub fn backend(&self) -> &XoriBackend<B> {
+        &self.backend
+    }
+
+    /// Get a mutable reference to the backend for advanced operations
+    #[inline(always)]
+    pub fn backend_mut(&mut self) -> &mut XoriBackend<B> {
+        &mut self.backend
     }
 }
