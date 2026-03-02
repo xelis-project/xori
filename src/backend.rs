@@ -4,7 +4,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use std::fmt::{self, Display};
-use crate::{ReaderError, Serializable, WriterError};
+use crate::{ReaderError, Serializable, WriterError, engine::IteratorMode};
 
 pub use memory::MemoryBackend;
 
@@ -34,6 +34,8 @@ pub enum BackendError<B: Display> {
     Writer(#[from] WriterError),
     #[error(transparent)]
     Reader(#[from] ReaderError),
+    #[error("Operation not supported by this backend")]
+    Unsupported,
     #[error("Backend error: {0}")]
     Backend(B),
 }
@@ -59,13 +61,10 @@ pub trait Backend {
     fn read<K: Serializable + Send + Sync>(&self, column: &Column, key: K) -> impl Future<Output = Result<Option<Self::RawBytes>, BackendError<Self::Error>>> + Send;
 
     /// Get all historical entries for a key (entire history)
-    fn iterator_prefix<'a, P: Serializable + Send + 'a>(&'a self, column: &'a Column, prefix: P) -> impl Future<Output = Result<impl Stream<Item = Result<(Self::RawBytes, Self::RawBytes), BackendError<Self::Error>>> + 'a, BackendError<Self::Error>>> + Send + 'a;
+    fn iterator<'a>(&'a self, column: &'a Column, mode: IteratorMode<'a>) -> impl Future<Output = Result<impl Stream<Item = Result<(Self::RawBytes, Self::RawBytes), BackendError<Self::Error>>> + 'a, BackendError<Self::Error>>> + Send + 'a;
 
     /// Check if a key exists at current version
     fn exists<K: Serializable + Send + Sync>(&self, column: &Column, key: K) -> impl Future<Output = Result<bool, BackendError<Self::Error>>> + Send;
-
-    /// Get all keys in a column
-    fn list_keys<'a>(&'a self, column: &'a Column) -> impl Future<Output = Result<impl Stream<Item = Result<Self::RawBytes, BackendError<Self::Error>>> + 'a, BackendError<Self::Error>>> + Send + 'a;
 
     /// Clear all data (careful operation)
     fn clear(&mut self) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;

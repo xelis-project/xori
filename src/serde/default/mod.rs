@@ -233,3 +233,18 @@ mod tests {
         assert_eq!(large_bytes[0], 0xFD); // VarInt prefix for u16
     }
 }
+
+impl<'a> Serializable for &'a [u8] {
+    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
+        writer.extend_bytes(self);
+        Ok(())
+    }
+
+    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+        Err(ReaderError::NotSerializable)
+    }
+
+    fn size(&self) -> usize {
+        self.len()
+    }
+}

@@ -8,6 +8,8 @@ use crate::{ReaderError, WriterError, backend::BackendError};
 /// Database errors
 #[derive(Error, Debug)]
 pub enum XoriError<T: Display> {
+    #[error("A snapshot is currently active, cannot perform this operation")]
+    SnapshotActive,
     #[error("Column already registered")]
     ColumnAlreadyRegistered,
     #[error("Key not found")]

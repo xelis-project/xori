@@ -73,7 +73,7 @@ impl XoriBuilder {
         }
 
         Ok(XoriEngine {
-            backend: XoriBackend { backend },
+            backend: XoriBackend { backend, snapshot: None },
             entity_registry: self.entity_registry,
         })
     }

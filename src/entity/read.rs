@@ -3,16 +3,7 @@ use std::{cmp::Ordering, marker::PhantomData};
 use futures::{Stream, future::Either, stream};
 
 use crate::{
-    Backend,
-    Entity,
-    Key,
-    Result,
-    Serializable,
-    Version,
-    VersionedEntry,
-    engine::XoriBackend,
-    builder::EntityInfo,
-    entity::SearchBias,
+    Backend, Entity, Key, Result, Serializable, Version, VersionedEntry, builder::EntityInfo, engine::{IteratorDirection, IteratorMode, XoriBackend}, entity::SearchBias
 };
 
 /// Entity handle for managing a specific entity type with versioning
@@ -165,8 +156,8 @@ impl<'engine, E: Entity, B: Backend> EntityReadHandle<'engine, E, B> {
     /// List all keys in the entity, using the key index if available
     pub async fn list_keys<'a, K: Serializable + Send + Sync + 'a>(&'a self) -> Result<impl Stream<Item = Result<K, B::Error>> + 'a, B::Error> {
         match self.info.key_index_column.as_ref() {
-            Some(index_col) => Ok(Either::Left(self.backend.list_keys(&index_col.key_to_id).await?)),
-            None => Ok(Either::Right(self.backend.list_keys(&self.info.column).await?)),
+            Some(index_col) => Ok(Either::Left(self.backend.iterator_keys(&index_col.key_to_id, IteratorMode::All(IteratorDirection::Forward)).await?)),
+            None => Ok(Either::Right(self.backend.iterator_keys(&self.info.column, IteratorMode::All(IteratorDirection::Forward)).await?)),
         }
     }
 }

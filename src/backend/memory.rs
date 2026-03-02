@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use futures::{stream, Stream};
-use crate::{Serializable, backend::BackendError};
+use itertools::Either;
+use crate::{Serializable, backend::BackendError, engine::{IteratorDirection, IteratorMode}};
 use super::{Backend, Column};
 use bytes::Bytes;
 
@@ -76,26 +77,51 @@ impl Backend for MemoryBackend {
             .and_then(|col| col.get(&key_bytes).cloned()))
     }
 
-    async fn iterator_prefix<'a, P: Serializable + 'a>(
+    async fn iterator<'a>(
         &'a self,
         column: &'a Column,
-        prefix: P,
+        mode: IteratorMode<'a>,
     ) -> Result<impl Stream<Item = Result<(Self::RawBytes, Self::RawBytes), BackendError<Self::Error>>> + 'a, BackendError<Self::Error>> {
-        let prefix_bytes = prefix.to_bytes()
-            .map(Bytes::from)
-            .map_err(BackendError::from)?;
-
         let entries = self.store
             .columns
             .get(column)
             .into_iter()
             .flat_map(move |col| {
-                let prefix = prefix_bytes.clone();
-                col.range(prefix.clone()..)
-                    .filter(move |(k, _)| k.starts_with(&prefix))
-                    .map(|(k, v)| (k.clone(), v.clone()))
-            })
-            .map(Ok);
+                match mode {
+                    IteratorMode::All(direction) => Either::Left(Either::Left(match direction {
+                        IteratorDirection::Forward => Either::Left(col.iter()),
+                        IteratorDirection::Backward => Either::Right(col.iter().rev()),
+                    })),
+                    IteratorMode::Prefix(prefix, direction) => {
+                        let prefix = Bytes::copy_from_slice(prefix);
+                        let range = col.range(prefix.clone()..);
+
+                        Either::Left(Either::Right(match direction {
+                            IteratorDirection::Forward => Either::Left(range),
+                            IteratorDirection::Backward => Either::Right(range.rev()),
+                        }.into_iter().take_while(move |(k, _)| k.starts_with(&prefix))))
+                    },
+                    IteratorMode::Range { start, end, direction } => {
+                        let start = Bytes::copy_from_slice(start);
+                        let end = Bytes::copy_from_slice(end);
+                        let range = col.range(start..end);
+
+                        Either::Right(match direction {
+                            IteratorDirection::Forward => Either::Left(range),
+                            IteratorDirection::Backward => Either::Right(range.rev()),
+                        })
+                    },
+                    IteratorMode::From(start, direction) => {
+                        let start = Bytes::copy_from_slice(start);
+                        let range = col.range(start..);
+
+                        Either::Right(match direction {
+                            IteratorDirection::Forward => Either::Left(range),
+                            IteratorDirection::Backward => Either::Right(range.rev()),
+                        })
+                    },
+                }.into_iter().map(|(k, v)| Ok((k.clone(), v.clone())))
+            });
 
         Ok(stream::iter(entries))
     }
@@ -130,21 +156,6 @@ impl Backend for MemoryBackend {
             .get(&column)
             .map_or(false, |col| col.contains_key(&key_bytes))
         )
-    }
-
-    async fn list_keys<'a>(
-        &'a self,
-        column: &'a Column,
-    ) -> Result<impl Stream<Item = Result<Self::RawBytes, BackendError<Self::Error>>> + 'a, BackendError<Self::Error>> {
-        let keys = self
-            .store
-            .columns
-            .get(column)
-            .into_iter()
-            .flat_map(|col| col.keys().cloned())
-            .map(Ok);
-
-        Ok(stream::iter(keys))
     }
 
     async fn clear(&mut self) -> Result<(), BackendError<Self::Error>> {
