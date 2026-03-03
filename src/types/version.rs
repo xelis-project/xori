@@ -116,7 +116,7 @@ mod tests {
 
         let mut serialized: Vec<(Version, Vec<u8>)> = versions
             .iter()
-            .map(|v| (*v, v.to_bytes().unwrap()))
+            .map(|v| (*v, v.to_bytes().unwrap().into_owned()))
             .collect();
 
         // Sort by serialized bytes (lexicographic order)
@@ -178,7 +178,7 @@ mod tests {
                     version: *v,
                     data: &key,
                 };
-                (entry.to_bytes().unwrap(), *v)
+                (entry.to_bytes().unwrap().into_owned(), *v)
             })
             .collect();
 
@@ -244,7 +244,7 @@ mod tests {
                     version: *v,
                     data: &key,
                 };
-                (entry.to_bytes().unwrap(), *v)
+                (entry.to_bytes().unwrap().into_owned(), *v)
             })
             .collect();
 

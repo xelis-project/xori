@@ -4,6 +4,8 @@ mod default;
 mod writable;
 mod varint;
 
+use std::borrow::Cow;
+
 pub use writer::{Writable, WriterError};
 pub use reader::{Reader, ReaderError};
 pub use writable::WritableBytes;
@@ -15,10 +17,10 @@ pub trait Serializable: Sized {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError>;
 
     /// Serialize to bytes
-    fn to_bytes(&self) -> Result<Vec<u8>, WriterError> {
+    fn to_bytes<'a>(&'a self) -> Result<Cow<'a, [u8]>, WriterError> {
         let mut buffer = Vec::with_capacity(self.size());
         self.write(&mut buffer)?;
-        Ok(buffer)
+        Ok(Cow::Owned(buffer))
     }
 
     /// Deserialize from bytes

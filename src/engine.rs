@@ -1,6 +1,7 @@
 mod error;
 mod iterator;
 
+use bytes::Bytes;
 use futures::future::Either;
 use futures::{Stream, StreamExt, stream};
 
@@ -84,7 +85,10 @@ impl<B: Backend> XoriBackend<B> {
     pub async fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&mut self, column: &Column, key: K, value: V) -> Result<(), B::Error> {
         match self.snapshot.as_mut().map(|snapshot| snapshot.column_mut(column.clone())) {
             Some(snapshot) => {
-                snapshot.insert(key.to_bytes()?, value.to_bytes()?);
+                let key = key.to_bytes()?;
+                let value = value.to_bytes()?;
+
+                snapshot.insert(Bytes::copy_from_slice(&key), Bytes::copy_from_slice(&value));
                 Ok(())
             },
             None => self.backend.write(column, key, value).await

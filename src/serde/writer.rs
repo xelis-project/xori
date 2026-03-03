@@ -10,6 +10,7 @@ pub enum WriterError {
 /// Trait for writing serialized data to a byte buffer or stream
 pub trait Writable {
     /// Write a single byte to the output
+    #[inline(always)]
     fn push(&mut self, byte: u8) {
         self.extend_bytes(&[byte]);
     }

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{collections::{BTreeMap, HashMap}, fmt::Display};
 use futures::{stream, Stream};
 use itertools::Either;
 use crate::{Serializable, backend::BackendError, engine::{IteratorDirection, IteratorMode}};
@@ -31,6 +31,13 @@ impl MemoryBackend {
     }
 }
 
+/// Helper function to serialize a Serializable value into Bytes for storage
+#[inline]
+fn serialize_data<V: Serializable, E: Display>(data: V) -> Result<Bytes, BackendError<E>> {
+    let bytes = data.to_bytes()?;
+    Ok(Bytes::copy_from_slice(&bytes))
+}
+
 impl Backend for MemoryBackend {
     type Error = std::convert::Infallible;
     type RawBytes = Bytes;
@@ -46,12 +53,8 @@ impl Backend for MemoryBackend {
         key: K,
         data: V,
     ) -> Result<(), BackendError<Self::Error>> {
-        let key_bytes = key.to_bytes()
-            .map(Bytes::from)
-            .map_err(BackendError::from)?;
-        let value_bytes = data.to_bytes()
-            .map(Bytes::from)
-            .map_err(BackendError::from)?;
+        let key_bytes = serialize_data(key)?;
+        let value_bytes = serialize_data(data)?;
 
         self.store
             .columns
@@ -67,9 +70,7 @@ impl Backend for MemoryBackend {
         column: &Column,
         key: K,
     ) -> Result<Option<Self::RawBytes>, BackendError<Self::Error>> {
-        let key_bytes = key.to_bytes()
-            .map(Bytes::from)
-            .map_err(BackendError::from)?;
+        let key_bytes = serialize_data(key)?;
 
         Ok(self.store
             .columns
@@ -131,9 +132,7 @@ impl Backend for MemoryBackend {
         column: &Column,
         key: K,
     ) -> Result<(), BackendError<Self::Error>> {
-        let key_bytes = key.to_bytes()
-            .map(Bytes::from)
-            .map_err(BackendError::from)?;
+        let key_bytes = serialize_data(key)?;
 
         if let Some(col) = self.store.columns.get_mut(&column) {
             col.remove(&key_bytes);
@@ -147,9 +146,7 @@ impl Backend for MemoryBackend {
         column: &Column,
         key: K,
     ) -> Result<bool, BackendError<Self::Error>> {
-        let key_bytes = key.to_bytes()
-            .map(Bytes::from)
-            .map_err(BackendError::from)?;
+        let key_bytes = serialize_data(key)?;
 
         Ok(self.store
             .columns
@@ -207,7 +204,7 @@ mod tests {
             kind: ColumnKind::Entity,
         };
 
-        backend.write(&column, &1u32, &100u64).await.unwrap();
+        backend.write(&column, 1u32, 100u64).await.unwrap();
         backend.clear().await.unwrap();
         assert!(!backend.exists(&column, &1u32).await.unwrap());
     }
