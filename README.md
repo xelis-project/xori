@@ -16,6 +16,7 @@ Xori is a database abstraction layer that provides versioned entity storage with
 - **Key Indexing**: Optional key indexing to reduce storage overhead for large keys
 - **Custom Serialization**: Built-in serialization framework with support for custom types
 - **Stream-Based APIs**: Efficient iteration over large datasets using Rust streams
+- **Snapshot**: Create memory snapshots of the database state to allow rollback of the operations
 
 ## Installation
 
