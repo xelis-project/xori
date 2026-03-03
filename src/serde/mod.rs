@@ -3,13 +3,13 @@ mod reader;
 mod default;
 mod writable;
 mod varint;
-
-use std::borrow::Cow;
+mod bytes;
 
 pub use writer::{Writable, WriterError};
 pub use reader::{Reader, ReaderError};
 pub use writable::WritableBytes;
 pub use varint::VarInt;
+pub use bytes::SerializedBytes;
 
 /// Trait for types that can be serialized and deserialized by Xori
 pub trait Serializable: Sized {
@@ -17,10 +17,10 @@ pub trait Serializable: Sized {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError>;
 
     /// Serialize to bytes
-    fn to_bytes<'a>(&'a self) -> Result<Cow<'a, [u8]>, WriterError> {
+    fn to_bytes<'a>(&'a self) -> Result<SerializedBytes<'a>, WriterError> {
         let mut buffer = Vec::with_capacity(self.size());
         self.write(&mut buffer)?;
-        Ok(Cow::Owned(buffer))
+        Ok(SerializedBytes::Owned(buffer.into_boxed_slice()))
     }
 
     /// Deserialize from bytes

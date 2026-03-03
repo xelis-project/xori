@@ -12,6 +12,10 @@ macro_rules! impl_serializable_integer {
                     Ok(())
                 }
 
+                fn to_bytes<'a>(&'a self) -> Result<SerializedBytes<'a>, WriterError> {
+                    Ok(SerializedBytes::Owned(Box::new(self.to_be_bytes())))
+                }
+
                 fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
                     let bytes = reader.read_bytes_ref($size)?;
                     Ok(<$ty>::from_be_bytes(bytes.try_into().expect(concat!("Failed to read ", stringify!($ty), " from bytes"))))
