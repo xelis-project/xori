@@ -49,6 +49,26 @@ impl<'a> SerializedBytes<'a> {
             SerializedBytes::Shared(bytes) => bytes.as_ref().into(),
         }
     }
+
+    /// Convert into a Bytes, consuming self
+    #[inline]
+    pub fn into_bytes(self) -> Bytes {
+        match self {
+            SerializedBytes::Borrowed(bytes) => Bytes::copy_from_slice(bytes),
+            SerializedBytes::Owned(bytes) => Bytes::copy_from_slice(&bytes),
+            SerializedBytes::Shared(bytes) => bytes,
+        }
+    }
+
+    /// Convert into a Bytes without consuming self
+    #[inline]
+    pub fn to_bytes(&self) -> Bytes {
+        match self {
+            SerializedBytes::Borrowed(bytes) => Bytes::copy_from_slice(bytes),
+            SerializedBytes::Owned(bytes) => Bytes::copy_from_slice(&bytes),
+            SerializedBytes::Shared(bytes) => bytes.clone(),
+        }
+    }
 }
 
 impl<'a> AsRef<[u8]> for SerializedBytes<'a> {
@@ -126,5 +146,26 @@ impl Ord for SerializedBytes<'_> {
     #[inline]
     fn cmp(&self, other: &Self) -> Ordering {
         self.as_ref().cmp(other.as_ref())
+    }
+}
+
+impl<'a> Into<Bytes> for SerializedBytes<'a> {
+    #[inline]
+    fn into(self) -> Bytes {
+        self.into_bytes()
+    }
+}
+
+impl<'a> Into<Vec<u8>> for SerializedBytes<'a> {
+    #[inline]
+    fn into(self) -> Vec<u8> {
+        self.into_vec()
+    }
+}
+
+impl<'a> Into<Box<[u8]>> for SerializedBytes<'a> {
+    #[inline]
+    fn into(self) -> Box<[u8]> {
+        self.into_boxed_slice()
     }
 }

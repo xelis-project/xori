@@ -117,4 +117,18 @@ impl<'a> Reader<'a> {
         self.total += n;
         Ok(bytes)
     }
+
+    /// Read all remaining bytes and return them as a slice reference
+    pub fn read_remaining_bytes(&mut self) -> Result<&[u8], ReaderError> {
+        if self.remaining() == 0 {
+            return Err(ReaderError::OutOfBounds {
+                requested: 1,
+                available: 0,
+            });
+        }
+
+        let bytes = &self.data[self.total..];
+        self.total = self.data.len();
+        Ok(bytes)
+    }
 }

@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 
+use ::bytes::Bytes;
+
 use super::*;
 use crate::VarInt;
 
@@ -273,6 +275,25 @@ impl<'a> Serializable for &'a [u8] {
 
     fn read(_: &mut Reader) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
+    }
+
+    fn size(&self) -> usize {
+        self.len()
+    }
+}
+
+impl Serializable for Bytes {
+    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
+        writer.extend_bytes(self.as_ref());
+        Ok(())
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        Ok(Bytes::copy_from_slice(reader.read_remaining_bytes()?))
+    }
+
+    fn to_bytes<'a>(&'a self) -> Result<SerializedBytes<'a>, WriterError> {
+        Ok(SerializedBytes::Borrowed(self.as_ref()))
     }
 
     fn size(&self) -> usize {
