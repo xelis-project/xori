@@ -11,6 +11,7 @@ use crate::{BackendError, EntityReadHandle, Serializable, Snapshot};
 use crate::backend::{Backend, Column};
 use crate::entity::{Entity, EntityWriteHandle};
 use std::collections::HashMap;
+use std::ops::{Deref, DerefMut};
 
 pub use error::{XoriError, Result};
 pub use iterator::{IteratorDirection, IteratorMode};
@@ -199,6 +200,22 @@ impl<B: Backend> XoriEngine<B> {
     /// Get a mutable reference to the backend for advanced operations
     #[inline(always)]
     pub fn backend_mut(&mut self) -> &mut XoriBackend<B> {
+        &mut self.backend
+    }
+}
+
+impl<B: Backend> Deref for XoriEngine<B> {
+    type Target = XoriBackend<B>;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &self.backend
+    }
+}
+
+impl<B: Backend> DerefMut for XoriEngine<B> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.backend
     }
 }

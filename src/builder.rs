@@ -60,6 +60,17 @@ impl XoriBuilder {
         self
     }
 
+    /// Register a custom column with the builder
+    #[inline]
+    pub fn register_column(&mut self, kind: ColumnKind) -> Column {
+        let column = Column {
+            id: self.column_index,
+            kind,
+        };
+        self.column_index += 1;
+        column
+    }
+
     /// Build the Xori engine with the given backend
     #[inline]
     pub async fn build<B: Backend>(self, backend: B) -> Result<XoriEngine<B>, B::Error> {

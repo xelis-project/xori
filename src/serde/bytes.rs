@@ -2,6 +2,8 @@ use std::{borrow::Borrow, cmp::Ordering, hash::{Hash, Hasher}, ops::Deref};
 
 use bytes::Bytes;
 
+use crate::{Reader, ReaderError, Serializable, Writable, WriterError};
+
 #[derive(Debug, Clone)]
 pub enum SerializedBytes<'a> {
     Borrowed(&'a [u8]),
@@ -167,5 +169,29 @@ impl<'a> Into<Box<[u8]>> for SerializedBytes<'a> {
     #[inline]
     fn into(self) -> Box<[u8]> {
         self.into_boxed_slice()
+    }
+}
+
+impl<'a> Serializable for SerializedBytes<'a> {
+    #[inline]
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        reader.read_remaining_bytes()
+            .map(|bytes| SerializedBytes::Owned(bytes.into()))
+    }
+
+    #[inline]
+    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
+        writer.extend_bytes(self.as_ref());
+        Ok(())
+    }
+
+    #[inline]
+    fn to_bytes<'b>(&'b self) -> Result<SerializedBytes<'b>, WriterError> {
+        Ok(SerializedBytes::Borrowed(self.as_ref()))
+    }
+
+    #[inline]
+    fn size(&self) -> usize {
+        self.as_ref().len()
     }
 }
