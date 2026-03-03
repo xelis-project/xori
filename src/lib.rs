@@ -5,6 +5,7 @@ pub mod serde;
 pub mod types;
 pub mod builder;
 pub mod snapshot;
+pub mod dag;
 
 pub use backend::{Backend, Column, BackendError, MemoryBackend};
 pub use entity::{Entity, EntityReadHandle};
@@ -13,3 +14,4 @@ pub use serde::*;
 pub use types::*;
 pub use builder::{XoriBuilder, EntityConfig};
 pub use snapshot::Snapshot;
+pub use dag::{DagState, DagEntry, DagEntryBuilder, DagKey, DagError, DagResult};
