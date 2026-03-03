@@ -4,7 +4,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use std::fmt::{self, Display};
-use crate::{ReaderError, Serializable, WriterError, engine::IteratorMode};
+use crate::{Reader, ReaderError, Serializable, VarInt, Writable, WriterError, engine::IteratorMode};
 
 pub use memory::MemoryBackend;
 
@@ -16,10 +16,48 @@ pub struct Column {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum ColumnKind {
     Entity,
     Index,
     Other,
+}
+
+impl Serializable for ColumnKind {
+    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
+        (*self as u8).write(writer)
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let value = u8::read(reader)?;
+        match value {
+            0 => Ok(ColumnKind::Entity),
+            1 => Ok(ColumnKind::Index),
+            2 => Ok(ColumnKind::Other),
+            _ => Err(ReaderError::UnexpectedValue),
+        }
+    }
+
+    fn size(&self) -> usize {
+        1
+    }
+}
+
+impl Serializable for Column {
+    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
+        VarInt::from(self.id).write(writer)?;
+        self.kind.write(writer)
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let id = VarInt::read(reader)?;
+        let kind = ColumnKind::read(reader)?;
+        Ok(Column { id: id.0 as u32, kind })
+    }
+
+    fn size(&self) -> usize {
+        VarInt::from(self.id).size() + self.kind.size()
+    }
 }
 
 impl fmt::Display for Column {

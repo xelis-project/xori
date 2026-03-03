@@ -14,10 +14,16 @@ use super::{Reader, ReaderError, Serializable, Writable, WriterError};
 pub struct VarInt(pub u64);
 
 impl VarInt {
-    /// Create a new VarInt from a usize value
+    /// Create a new VarInt from a u64 value
     #[inline]
     pub const fn new(value: u64) -> Self {
         Self(value)
+    }
+
+    /// Create a new VarInt from any compatible value
+    #[inline]
+    pub fn from<T: Into<u64>>(value: T) -> Self {
+        Self(value.into())
     }
 
     /// Get the inner u64 value
