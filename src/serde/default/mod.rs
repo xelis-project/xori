@@ -79,14 +79,22 @@ impl Serializable for () {
 }
 
 impl<'a, T: Serializable + Clone> Serializable for Cow<'a, T> {
+    #[inline]
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         self.as_ref().write(writer)
     }
 
+    #[inline]
+    fn to_bytes<'b>(&'b self) -> Result<SerializedBytes<'b>, WriterError> {
+        self.as_ref().to_bytes()
+    }
+
+    #[inline]
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         T::read(reader).map(Cow::Owned)
     }
 
+    #[inline]
     fn size(&self) -> usize {
         self.as_ref().size()
     }
