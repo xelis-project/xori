@@ -3,7 +3,7 @@ use std::{cmp::Ordering, marker::PhantomData};
 use futures::{Stream, future::Either, stream};
 
 use crate::{
-    Backend, Entity, Key, Result, Serializable, Version, VersionedEntry, builder::EntityInfo, engine::{IteratorDirection, IteratorMode, XoriBackend}, entity::SearchBias
+    Backend, Entity, Key, Result, Serializable, Version, VersionedKey, XoriError, builder::EntityInfo, engine::{IteratorDirection, IteratorMode, XoriBackend}, entity::SearchBias
 };
 
 /// Entity handle for managing a specific entity type with versioning
@@ -40,19 +40,20 @@ impl<'engine, E: Entity, B: Backend> EntityReadHandle<'engine, E, B> {
     pub async fn read_at_version<K: Serializable + Send + Sync>(&self, key: &K, version: Version) -> Result<Option<E>, B::Error> {
         Ok(match self.fetch_key_index(key).await? {
             Some(mapped_key) => {
-                let versioned_key = VersionedEntry {
+                let versioned_key = VersionedKey {
                     version,
-                    data: &mapped_key,
+                    key: &mapped_key,
                 };
 
-                self.backend.read::<_, E>(&self.info.column, &versioned_key).await?
+                self.backend.read::<_, Option<E>>(&self.info.column, &versioned_key).await?
+                    .ok_or(XoriError::VersionNotFound)?
             },
             None => None,
         })
     }
 
     /// Get the entire history of versions for a given key as a stream of (value, version) pairs, starting from the latest version and going backwards
-    pub async fn history<'a, K: Serializable + Send + Sync>(&'a self, key: &'a K) -> Result<impl Stream<Item = Result<(E, Version), B::Error>> + 'a, B::Error> {
+    pub async fn history<'a, K: Serializable + Send + Sync>(&'a self, key: &'a K) -> Result<impl Stream<Item = Result<(Option<E>, Version), B::Error>> + 'a, B::Error> {
         Ok(stream::unfold(
             match self.fetch_key_index(key).await? {
                 Some(mapped_key) => self.version(&mapped_key).await?
@@ -62,12 +63,12 @@ impl<'engine, E: Entity, B: Backend> EntityReadHandle<'engine, E, B> {
             move |state| async move {
                 let (key, version) = state?;
 
-                let versioned_key = VersionedEntry {
+                let versioned_key = VersionedKey {
                     version,
-                    data: &key,
+                    key: &key,
                 };
 
-                match self.backend.read::<_, E>(&self.info.column, &versioned_key).await {
+                match self.backend.read::<_, Option<E>>(&self.info.column, &versioned_key).await {
                     Ok(Some(value)) => {
                         let next_version = version.previous();
                         Some((Ok((value, version)), next_version.map(|v| (key, v))))
@@ -84,9 +85,9 @@ impl<'engine, E: Entity, B: Backend> EntityReadHandle<'engine, E, B> {
         &self,
         key: &K,
         top_version: Version,
-        f: fn(&Version, &E) -> Ordering,
+        f: fn(&Version, Option<&E>) -> Ordering,
         bias: SearchBias,
-    ) -> Result<Option<(E, Version)>, B::Error> {
+    ) -> Result<Option<(Option<E>, Version)>, B::Error> {
         let Some(mapped_key) = self.fetch_key_index(key).await? else {
             return Ok(None);
         };
@@ -99,16 +100,16 @@ impl<'engine, E: Entity, B: Backend> EntityReadHandle<'engine, E, B> {
             let mid = low + (high - low) / 2;
             let mid_version = Version(mid);
 
-            let versioned_key = VersionedEntry {
+            let versioned_key = VersionedKey {
                 version: mid_version,
-                data: &mapped_key,
+                key: &mapped_key,
             };
 
             // Check if this version exists in storage
-            let maybe_value = self.backend.read::<_, E>(&self.info.column, &versioned_key).await?;
+            let maybe_value = self.backend.read::<_, Option<E>>(&self.info.column, &versioned_key).await?;
 
             if let Some(value) = maybe_value {
-                match f(&mid_version, &value) {
+                match f(&mid_version, value.as_ref()) {
                     Ordering::Equal => {
                         // Found a match, but continue searching based on bias
                         result = Some((value, mid_version));

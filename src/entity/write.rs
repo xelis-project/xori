@@ -10,7 +10,8 @@ use crate::{
     Result,
     Serializable,
     Version,
-    VersionedEntry,
+    VersionedKey,
+    XoriError,
     builder::EntityInfo,
     engine::XoriBackend
 };
@@ -92,12 +93,34 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
             .map(Version::next)
             .unwrap_or_default();
 
-        let versioned = VersionedEntry {
+        let versioned = VersionedKey {
             version,
-            data: &key,
+            key: &key,
         };
 
-        self.backend.write(&self.info.column, &versioned, &value).await?;
+        self.backend.write(&self.info.column, &versioned, Some(&value)).await?;
+
+        // Update the latest version for the key
+        self.update_version(&key, version).await
+    }
+
+    /// Store a deletion entry for the given key, which will be interpreted as a deletion of the latest version
+    pub async fn store_deleted<K: Serializable + Send + Sync>(&mut self, key: K) -> Result<(), B::Error> {
+        // Map the key if required
+        let key = self.get_or_create_key(key).await?;
+
+        // load the current version and increment it for the new entry
+        let version = match self.version(&key).await? {
+            Some(version) => version.next(),
+            None => return Err(XoriError::NoVersionAvailable),
+        };
+
+        let versioned = VersionedKey {
+            version,
+            key: &key,
+        };
+
+        self.backend.write(&self.info.column, &versioned, None::<()>).await?;
 
         // Update the latest version for the key
         self.update_version(&key, version).await
@@ -127,9 +150,9 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
                         break;
                     }
 
-                    let versioned_key = VersionedEntry {
+                    let versioned_key = VersionedKey {
                         version: v,
-                        data: &mapped_key,
+                        key: &mapped_key,
                     };
 
                     self.backend.delete(&self.info.column, &versioned_key).await?;
@@ -161,9 +184,9 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
 
                 // Clean up all versions for the key
                 while let Some(v) = version.previous() {
-                    let versioned_key = VersionedEntry {
+                    let versioned_key = VersionedKey {
                         version: v,
-                        data: &mapped_key,
+                        key: &mapped_key,
                     };
 
                     self.backend.delete(&self.info.column, &versioned_key).await?;

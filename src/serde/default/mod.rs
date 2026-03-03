@@ -78,6 +78,25 @@ impl Serializable for () {
     }
 }
 
+impl Serializable for String {
+    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
+        // Write length as VarInt, then raw UTF-8 bytes
+        VarInt(self.len() as u64).write(writer)?;
+        writer.extend_bytes(self.as_bytes());
+        Ok(())
+    }
+
+    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let len = VarInt::read(reader)?.0 as usize;
+        let bytes = reader.read_bytes_ref(len)?;
+        String::from_utf8(bytes.to_vec()).map_err(|_| ReaderError::UnexpectedValue)
+    }
+
+    fn size(&self) -> usize {
+        VarInt::encoded_size(self.len()) + self.len()
+    }
+}
+
 impl<'a, T: Serializable + Clone> Serializable for Cow<'a, T> {
     #[inline]
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {

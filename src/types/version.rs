@@ -35,26 +35,29 @@ impl Serializable for Version {
 }
 
 /// Represents a single value entry with version information
+/// Serialize the key first to have the properties of the key preserved in the BTree ordering,
+/// then serialize the version to allow for version-based range queries
+/// It allows for range queries based on version for a specific key
 #[derive(Debug, Clone)]
-pub struct VersionedEntry<E: Serializable> {
+pub struct VersionedKey<E: Serializable> {
+    pub key: E,
     pub version: Version,
-    pub data: E,
 }
 
-impl<E: Serializable> Serializable for VersionedEntry<E> {
+impl<E: Serializable> Serializable for VersionedKey<E> {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        self.version.write(writer)?;
-        self.data.write(writer)
+        self.key.write(writer)?;
+        self.version.write(writer)
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+        let key = E::read(reader)?;
         let version = Version::read(reader)?;
-        let data = E::read(reader)?;
-        Ok(Self { version, data })
+        Ok(Self { version, key })
     }
 
     fn size(&self) -> usize {
-        self.version.size() + self.data.size()
+        self.key.size() + self.version.size()
     }
 }
 
@@ -174,9 +177,9 @@ mod tests {
         let mut entries: Vec<(Vec<u8>, Version)> = versions
             .iter()
             .map(|v| {
-                let entry = VersionedEntry {
+                let entry = VersionedKey {
                     version: *v,
-                    data: &key,
+                    key: &key,
                 };
                 (entry.to_bytes().unwrap().into_vec(), *v)
             })
@@ -240,9 +243,9 @@ mod tests {
         let mut serialized_entries: Vec<(Vec<u8>, Version)> = versions
             .iter()
             .map(|v| {
-                let entry = VersionedEntry {
+                let entry = VersionedKey {
                     version: *v,
-                    data: &key,
+                    key: &key,
                 };
                 (entry.to_bytes().unwrap().into_vec(), *v)
             })

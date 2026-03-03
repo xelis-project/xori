@@ -47,7 +47,7 @@ pub(crate) async fn version<K: Serializable + Send + Sync, B: Backend>(backend: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MemoryBackend, VersionedEntry, XoriBuilder, builder::EntityConfig};
+    use crate::{MemoryBackend, VersionedKey, XoriBuilder, builder::EntityConfig};
     use std::cmp::Ordering;
 
     #[derive(Debug, Clone, PartialEq)]
@@ -119,7 +119,7 @@ mod tests {
             .binary_search_with_bias(
                 &key,
                 Version(0),
-                |_, entity| if entity.value == 100 { Ordering::Equal } else { Ordering::Less },
+                |_, entity| if entity.unwrap().value == 100 { Ordering::Equal } else { Ordering::Less },
                 SearchBias::Lowest,
             )
             .await
@@ -127,7 +127,7 @@ mod tests {
 
         assert!(result.is_some());
         let (entity, version) = result.unwrap();
-        assert_eq!(entity.value, 100);
+        assert_eq!(entity.unwrap().value, 100);
         assert_eq!(version, Version(0));
     }
 
@@ -147,6 +147,7 @@ mod tests {
                 &key,
                 Version(9),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value < 50 {
                         Ordering::Greater
                     } else if entity.value > 50 {
@@ -162,7 +163,7 @@ mod tests {
 
         assert!(result.is_some());
         let (entity, version) = result.unwrap();
-        assert_eq!(entity.value, 50);
+        assert_eq!(entity.unwrap().value, 50);
         assert_eq!(version, Version(5));
     }
 
@@ -186,6 +187,7 @@ mod tests {
                 &key,
                 Version(6),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value < 50 {
                         Ordering::Greater
                     } else {
@@ -199,7 +201,7 @@ mod tests {
 
         assert!(result.is_some());
         let (entity, version) = result.unwrap();
-        assert_eq!(entity.value, 50);
+        assert_eq!(entity.unwrap().value, 50);
         assert_eq!(version, Version(3)); // Should find the first occurrence
     }
 
@@ -224,6 +226,7 @@ mod tests {
                 &key,
                 Version(6),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value < 50 {
                         Ordering::Greater
                     } else if entity.value > 50 {
@@ -239,7 +242,7 @@ mod tests {
 
         assert!(result.is_some());
         let (entity, version) = result.unwrap();
-        assert_eq!(entity.value, 50);
+        assert_eq!(entity.unwrap().value, 50);
         assert_eq!(version, Version(5)); // Should find the last occurrence of value 50
     }
 
@@ -260,6 +263,7 @@ mod tests {
                 &key,
                 Version(9),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value < 55 {
                         Ordering::Greater
                     } else if entity.value > 55 {
@@ -294,6 +298,7 @@ mod tests {
                 &key,
                 Version(4),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value > 0 {
                         Ordering::Less
                     } else {
@@ -307,7 +312,7 @@ mod tests {
 
         assert!(result.is_some());
         let (entity, version) = result.unwrap();
-        assert_eq!(entity.value, 0);
+        assert_eq!(entity.unwrap().value, 0);
         assert_eq!(version, Version(0));
     }
 
@@ -328,6 +333,7 @@ mod tests {
                 &key,
                 Version(4),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value < 40 {
                         Ordering::Greater
                     } else if entity.value > 40 {
@@ -343,7 +349,7 @@ mod tests {
 
         assert!(result.is_some());
         let (entity, version) = result.unwrap();
-        assert_eq!(entity.value, 40);
+        assert_eq!(entity.unwrap().value, 40);
         assert_eq!(version, Version(4));
     }
 
@@ -364,6 +370,7 @@ mod tests {
                 &key,
                 Version(19),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value < 15 {
                         Ordering::Greater // Need to go higher
                     } else {
@@ -377,7 +384,7 @@ mod tests {
 
         assert!(result.is_some());
         let (entity, version) = result.unwrap();
-        assert_eq!(entity.value, 15);
+        assert_eq!(entity.unwrap().value, 15);
         assert_eq!(version, Version(15));
     }
 
@@ -398,6 +405,7 @@ mod tests {
                 &key,
                 Version(4),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value < 100 {
                         Ordering::Greater
                     } else {
@@ -429,6 +437,7 @@ mod tests {
                 &key,
                 Version(4),
                 |_, entity| {
+                    let entity = entity.unwrap();
                     if entity.value > 50 {
                         Ordering::Less
                     } else {
@@ -460,7 +469,7 @@ mod tests {
             .binary_search_with_bias(
                 &nonexistent_key,
                 Version(4),
-                |_, entity| if entity.value == 20 { Ordering::Equal } else { Ordering::Less },
+                |_, entity| if entity.unwrap().value == 20 { Ordering::Equal } else { Ordering::Less },
                 SearchBias::Lowest,
             )
             .await
@@ -576,8 +585,7 @@ mod tests {
 
         // Versions 3, 4 should not exist
         for v in 3..5 {
-            let result = handle.read_at_version(&key, Version(v)).await.unwrap();
-            assert!(result.is_none());
+            assert!(handle.read_at_version(&key, Version(v)).await.is_err());
         }
     }
 
@@ -629,8 +637,7 @@ mod tests {
         }
 
         // Version 3 should not exist
-        let v3 = handle.read_at_version(&key, Version(3)).await.unwrap();
-        assert!(v3.is_none());
+        assert!(handle.read_at_version(&key, Version(3)).await.is_err());
     }
 
     #[tokio::test]
@@ -695,9 +702,9 @@ mod tests {
         }
 
         // Delete version 3 specifically
-        let versioned_key = VersionedEntry {
+        let versioned_key = VersionedKey {
             version: Version(3),
-            data: &key,
+            key: &key,
         };
         handle.backend.delete(&handle.info.column, &versioned_key).await.unwrap();
 
@@ -714,9 +721,9 @@ mod tests {
         assert!(handle.read_at_version(&key, Version(1)).await.unwrap().is_some());
 
         // Versions 2, 3, 4 should not exist
-        assert!(handle.read_at_version(&key, Version(2)).await.unwrap().is_none());
-        assert!(handle.read_at_version(&key, Version(3)).await.unwrap().is_none());
-        assert!(handle.read_at_version(&key, Version(4)).await.unwrap().is_none());
+        assert!(handle.read_at_version(&key, Version(2)).await.is_err());
+        assert!(handle.read_at_version(&key, Version(3)).await.is_err());
+        assert!(handle.read_at_version(&key, Version(4)).await.is_err());
     }
 
     #[tokio::test]
@@ -741,8 +748,7 @@ mod tests {
 
         // Check that deleted versions don't exist
         for v in 5..10 {
-            let entity = handle.read_at_version(&key, Version(v)).await.unwrap();
-            assert!(entity.is_none());
+            assert!(handle.read_at_version(&key, Version(v)).await.is_err());
         }
 
         // Latest version should be 4
