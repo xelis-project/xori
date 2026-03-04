@@ -62,6 +62,25 @@ impl<K: DagKey> Serializable for DagEntry<K> {
     }
 }
 
+/// Abstraction for different ways to provide keys for DAG traversal.
+pub trait KeyInput<'a, K: 'a> {
+    type Iter: Iterator<Item = K>;
+
+    /// Convert this input into an iterator over keys.
+    fn keys(self) -> Self::Iter;
+}
+
+impl<'a, T, K> KeyInput<'a, K> for T
+where
+    K: 'a,
+    T: IntoIterator<Item = K>
+{
+    type Iter = T::IntoIter;
+    fn keys(self) -> Self::Iter {
+        self.into_iter()
+    }
+}
+
 /// Result of reading a key from the DAG, as seen from a given set of tips.
 /// K is the key at which the value was found (could be one of the tips or an ancestor).
 /// V is the value type stored in the DAG (e.g. block header data).
@@ -150,20 +169,25 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
     }
 
     /// Get the predecessors of a given entry as a stream.
-    pub async fn predecessors<'a>(&'a self, key: &'a K) -> DagResult<impl Stream<Item = DagResult<K, B::Error>> + 'a, B::Error> {
+    pub async fn predecessors<'a, KI: KeyInput<'a, K>>(&'a self, keys: KI) -> DagResult<impl Stream<Item = DagResult<K, B::Error>> + 'a, B::Error> {
         struct StreamState<K> {
             predecessors: VecDeque<K>,
             visited: HashSet<K>,
         }
 
+
+        let mut predecessors = VecDeque::new();
+        for key in keys.keys() {
+            if let Some(entry) = self.get_entry(&key).await? {
+                predecessors.extend(entry.predecessors.into_iter());
+            }
+        }
+
         Ok(stream::unfold(
-            match self.get_entry(key).await? {
-                Some(entry) => Some(StreamState {
-                    visited: HashSet::new(),
-                    predecessors: VecDeque::from(entry.predecessors),
-                }),
-                None => None,
-            },
+            Some(StreamState {
+                visited: HashSet::new(),
+                predecessors,
+            }),
             |state| async {
                 let mut state = state?;
                 let mut predecessor = state.predecessors.pop_front()?;
@@ -185,20 +209,24 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
 
     /// Get the predecessors of a given entry by level, as a stream of vectors.
     /// Each vector contains the predecessors at the same level (i.e. same distance from the original entry).
-    pub async fn predecessors_by_level<'a>(&'a self, key: &'a K) -> DagResult<impl Stream<Item = DagResult<IndexSet<K>, B::Error>> + 'a, B::Error> {
+    pub async fn predecessors_by_level<'a, KI: KeyInput<'a, K>>(&'a self, keys: KI) -> DagResult<impl Stream<Item = DagResult<IndexSet<K>, B::Error>> + 'a, B::Error> {
         struct StreamState<K> {
             current_level: IndexSet<K>,
             visited: HashSet<K>,
         }
 
+        let mut current_level = IndexSet::new();
+        for key in keys.keys() {
+            if let Some(entry) = self.get_entry(&key).await? {
+                current_level.extend(entry.predecessors.into_iter());
+            }
+        }
+
         Ok(stream::unfold(
-            match self.get_entry(key).await? {
-                Some(entry) => Some(StreamState {
-                    visited: HashSet::new(),
-                    current_level: IndexSet::from_iter(entry.predecessors),
-                }),
-                None => None,
-            },
+            Some(StreamState {
+                visited: HashSet::new(),
+                current_level,
+            }),
             |state| async {
                 let mut state = state?;
                 if state.current_level.is_empty() {
@@ -211,8 +239,8 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
                         continue;
                     }
 
-                    match self.get_entry(predecessor).await {
-                        Ok(Some(entry)) => next_level.extend(entry.predecessors),
+                    match self.get_entry(&predecessor).await {
+                        Ok(Some(entry)) => next_level.extend(entry.predecessors.into_iter()),
                         Ok(None) => return Some((Err(DagError::EntryNotFound), Some(state))),
                         Err(e) => return Some((Err(DagError::from(e)), Some(state))),
                     }
@@ -499,6 +527,7 @@ impl<K: DagKey> DagEntryBuilder<K> {
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
+    use std::iter;
 
     use futures::TryStreamExt;
     use indexmap::IndexSet;
@@ -547,7 +576,7 @@ mod tests {
         assert_stored_u64(dag.read::<_, u64>(&column, 2u8, &[4]).await.unwrap(), 20);
         assert_stored_u64(dag.read::<_, u64>(&column, 3u8, &[4]).await.unwrap(), 30);
 
-        let levels = dag.predecessors_by_level(&4).await.unwrap()
+        let levels = dag.predecessors_by_level(iter::once(4u64)).await.unwrap()
             .try_collect::<Vec<_>>()
             .await
             .unwrap();
@@ -704,14 +733,14 @@ mod tests {
         // Pop 1 -> visit 1, no preds -> [2, 3]
         // Pop 2 -> visit 2, add 1 but already visited -> [3]
         // Pop 3 -> visit 3, add 1 but already visited -> []
-        let preds: Vec<u64> = dag.predecessors(&8).await.unwrap()
+        let preds: Vec<u64> = dag.predecessors(iter::once(8u64)).await.unwrap()
             .try_collect()
             .await
             .unwrap();
 
         assert_eq!(preds, vec![6, 9, 7, 4, 5, 1, 2, 3]);
 
-        let preds_by_level: Vec<IndexSet<u64>> = dag.predecessors_by_level(&8).await.unwrap()
+        let preds_by_level: Vec<IndexSet<u64>> = dag.predecessors_by_level(iter::once(8u64)).await.unwrap()
             .try_collect()
             .await
             .unwrap();
@@ -723,7 +752,7 @@ mod tests {
         assert_eq!(preds_by_level, vec![level4, level3, level2, level1]);
 
         // Verify predecessors from merge_2 (7)
-        let preds_7: Vec<u64> = dag.predecessors(&7).await.unwrap()
+        let preds_7: Vec<u64> = dag.predecessors(iter::once(7u64)).await.unwrap()
             .try_collect()
             .await
             .unwrap();
@@ -731,11 +760,29 @@ mod tests {
         assert_eq!(preds_7, vec![6, 9, 4, 5, 1, 2, 3]);
 
         // Verify predecessors from merge_1 (6)
-        let preds_6: Vec<u64> = dag.predecessors(&6).await.unwrap()
+        let preds_6: Vec<u64> = dag.predecessors(iter::once(6u64)).await.unwrap()
             .try_collect()
             .await
             .unwrap();
 
         assert_eq!(preds_6, vec![4, 5, 2, 3, 1]);
+
+        // Get predecessors of 4 & 5 together, should be [2, 3, 1]
+        let preds_4_5: Vec<u64> = dag.predecessors(vec![4u64, 5u64]).await.unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        assert_eq!(preds_4_5, vec![2, 3, 1]);
+
+        // Then grouped by level should be [[2, 3], [1]]
+        let preds_4_5_by_level: Vec<IndexSet<u64>> = dag.predecessors_by_level(vec![4u64, 5u64]).await.unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        let level2_4_5: IndexSet<u64> = IndexSet::from_iter(vec![2, 3]);
+        let level1_4_5: IndexSet<u64> = IndexSet::from_iter(vec![1u64]);
+        assert_eq!(preds_4_5_by_level, vec![level2_4_5, level1_4_5]);
     }
 }
