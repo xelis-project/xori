@@ -1,13 +1,14 @@
 mod error;
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 
 pub use error::{DagError, DagResult};
-use futures::TryStreamExt;
+use futures::{Stream, TryStreamExt, stream};
+use indexmap::IndexSet;
 
 use crate::{SerializedBytes, Snapshot, XoriBuilder, XoriEngine};
 use crate::backend::{Backend, Column, ColumnKind};
@@ -146,7 +147,84 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
     #[inline(always)]
     pub fn engine_mut(&mut self) -> &mut XoriEngine<B> {
         &mut self.engine
-     }
+    }
+
+    /// Get the predecessors of a given entry as a stream.
+    pub async fn predecessors<'a>(&'a self, key: &'a K) -> DagResult<impl Stream<Item = DagResult<K, B::Error>> + 'a, B::Error> {
+        struct StreamState<K> {
+            predecessors: VecDeque<K>,
+            visited: HashSet<K>,
+        }
+
+        Ok(stream::unfold(
+            match self.get_entry(key).await? {
+                Some(entry) => Some(StreamState {
+                    visited: HashSet::new(),
+                    predecessors: VecDeque::from(entry.predecessors),
+                }),
+                None => None,
+            },
+            |state| async {
+                let mut state = state?;
+                let mut predecessor = state.predecessors.pop_front()?;
+                while !state.visited.insert(predecessor.clone()) {
+                    predecessor = state.predecessors.pop_front()?;
+                }
+
+                match self.get_entry(&predecessor).await {
+                    Ok(Some(entry)) => {
+                        state.predecessors.extend(entry.predecessors);
+                        Some((Ok(predecessor), Some(state)))
+                    }
+                    Ok(None) => Some((Err(DagError::EntryNotFound), Some(state))),
+                    Err(e) => Some((Err(DagError::from(e)), Some(state))),
+                }
+            }
+        ))
+    }
+
+    /// Get the predecessors of a given entry by level, as a stream of vectors.
+    /// Each vector contains the predecessors at the same level (i.e. same distance from the original entry).
+    pub async fn predecessors_by_level<'a>(&'a self, key: &'a K) -> DagResult<impl Stream<Item = DagResult<IndexSet<K>, B::Error>> + 'a, B::Error> {
+        struct StreamState<K> {
+            current_level: IndexSet<K>,
+            visited: HashSet<K>,
+        }
+
+        Ok(stream::unfold(
+            match self.get_entry(key).await? {
+                Some(entry) => Some(StreamState {
+                    visited: HashSet::new(),
+                    current_level: IndexSet::from_iter(entry.predecessors),
+                }),
+                None => None,
+            },
+            |state| async {
+                let mut state = state?;
+                if state.current_level.is_empty() {
+                    return None;
+                }
+
+                let mut next_level = IndexSet::new();
+                for predecessor in state.current_level.iter() {
+                    if !state.visited.insert(predecessor.clone()) {
+                        continue;
+                    }
+
+                    match self.get_entry(predecessor).await {
+                        Ok(Some(entry)) => next_level.extend(entry.predecessors),
+                        Ok(None) => return Some((Err(DagError::EntryNotFound), Some(state))),
+                        Err(e) => return Some((Err(DagError::from(e)), Some(state))),
+                    }
+                }
+
+                let current_level = std::mem::take(&mut state.current_level);
+                state.current_level = next_level;
+
+                Some((Ok(current_level), Some(state)))
+            }
+        ))
+    }
 
     /// Add a new entry to the DAG.
     ///
@@ -422,6 +500,9 @@ impl<K: DagKey> DagEntryBuilder<K> {
 mod tests {
     use std::borrow::Cow;
 
+    use futures::TryStreamExt;
+    use indexmap::IndexSet;
+
     use crate::backend::{ColumnKind, MemoryBackend};
     use crate::dag::ReadResult;
     use crate::{DagEntryBuilder, DagState, XoriBuilder};
@@ -465,6 +546,15 @@ mod tests {
         assert_stored_u64(dag.read::<_, u64>(&column, 1u8, &[4]).await.unwrap(), 10);
         assert_stored_u64(dag.read::<_, u64>(&column, 2u8, &[4]).await.unwrap(), 20);
         assert_stored_u64(dag.read::<_, u64>(&column, 3u8, &[4]).await.unwrap(), 30);
+
+        let levels = dag.predecessors_by_level(&4).await.unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+
+        let last_level: IndexSet<u64> = IndexSet::from_iter(vec![2u64, 3u64]);
+        let first_level: IndexSet<u64> = IndexSet::from_iter(vec![1u64]);
+        assert_eq!(levels, vec![last_level, first_level]);
     }
 
     #[tokio::test]
@@ -548,5 +638,104 @@ mod tests {
         // Each branch tip still sees its own latest conflicting value.
         assert_stored_u64(dag.read::<_, u64>(&column, &shared, &[400]).await.unwrap(), 400);
         assert_stored_u64(dag.read::<_, u64>(&column, &shared, &[500]).await.unwrap(), 500);
+    }
+
+    #[tokio::test]
+    async fn dag_predecessors_order() {
+        let (mut dag, _) = create_dag().await;
+
+        // Build a more complex DAG with multiple branches and merges:
+        //       /---> 2 ---> 4 --\
+        //      /                   \
+        //  1 --                      6 ---> 7
+        //      \                    /      /
+        //       \---> 3 ---> 5 --/-------/
+        //
+        // Then add another merge point:
+        //     /-----------------------> 9 ---\
+        //    /                            \   \
+        //   /   /---> 2 ---> 4 -\      /-> 7 ->\
+        //  /   /                 \    /         \
+        //  1 --                   \-> 6 ------> 8
+        //      \                    /          /
+        //       \---> 3 ---> 5 ----/----------/
+        // from 8: [6, 9, 7, 4, 5, 1, 2, 3]
+
+        // Genesis
+        let genesis = DagEntryBuilder::new(vec![]);
+        genesis.commit(&mut dag, 1).await.unwrap();
+
+        // First level branches
+        let left_1 = DagEntryBuilder::new(vec![1]);
+        left_1.commit(&mut dag, 2).await.unwrap();
+
+        let right_1 = DagEntryBuilder::new(vec![1]);
+        right_1.commit(&mut dag, 3).await.unwrap();
+
+        let middle = DagEntryBuilder::new(vec![1]);
+        middle.commit(&mut dag, 9).await.unwrap();
+
+        // Second level branches
+        let left_2 = DagEntryBuilder::new(vec![2]);
+        left_2.commit(&mut dag, 4).await.unwrap();
+
+        let right_2 = DagEntryBuilder::new(vec![3]);
+        right_2.commit(&mut dag, 5).await.unwrap();
+
+        // First merge: 2 -> 4 and 3 -> 5 merge
+        let merge_1 = DagEntryBuilder::new(vec![4, 5]);
+        merge_1.commit(&mut dag, 6).await.unwrap();
+
+        // Second merge: 6 and 9 merge
+        let merge_2 = DagEntryBuilder::new(vec![6, 9]);
+        merge_2.commit(&mut dag, 7).await.unwrap();
+
+        // Third merge with more branches
+        let merge_3 = DagEntryBuilder::new(vec![6, 9, 7]);
+        merge_3.commit(&mut dag, 8).await.unwrap();
+
+        // Verify predecessors from the most merged node (8)
+        // Predecessors are [6, 9, 7]. VecDeque pops from front, so:
+        // Pop 6 -> visit 6, add 4,5 to queue -> [9, 7, 4, 5]
+        // Pop 9 -> visit 9, add 1 to queue -> [7, 4, 5, 1]
+        // Pop 7 -> visit 7, add 6,9 but already visited -> [4, 5, 1]
+        // Pop 4 -> visit 4, add 2 to queue -> [5, 1, 2]
+        // Pop 5 -> visit 5, add 3 to queue -> [1, 2, 3]
+        // Pop 1 -> visit 1, no preds -> [2, 3]
+        // Pop 2 -> visit 2, add 1 but already visited -> [3]
+        // Pop 3 -> visit 3, add 1 but already visited -> []
+        let preds: Vec<u64> = dag.predecessors(&8).await.unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        assert_eq!(preds, vec![6, 9, 7, 4, 5, 1, 2, 3]);
+
+        let preds_by_level: Vec<IndexSet<u64>> = dag.predecessors_by_level(&8).await.unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        let level4: IndexSet<u64> = IndexSet::from_iter(vec![6, 9, 7]);
+        let level3: IndexSet<u64> = IndexSet::from_iter(vec![4, 5, 1, 6, 9]);
+        let level2: IndexSet<u64> = IndexSet::from_iter(vec![2, 3]);
+        let level1: IndexSet<u64> = IndexSet::from_iter(vec![1u64]);
+        assert_eq!(preds_by_level, vec![level4, level3, level2, level1]);
+
+        // Verify predecessors from merge_2 (7)
+        let preds_7: Vec<u64> = dag.predecessors(&7).await.unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        assert_eq!(preds_7, vec![6, 9, 4, 5, 1, 2, 3]);
+
+        // Verify predecessors from merge_1 (6)
+        let preds_6: Vec<u64> = dag.predecessors(&6).await.unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+
+        assert_eq!(preds_6, vec![4, 5, 2, 3, 1]);
     }
 }
