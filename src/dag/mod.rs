@@ -24,16 +24,27 @@ use crate::serde::{Reader, ReaderError, Serializable, Writable, WriterError};
 /// - Its order (for deterministic conflict resolution during traversal)
 /// - The changes (diffs) it introduces, organized by column
 #[derive(Debug, Clone)]
-pub struct DagEntry<K: DagKey> {
+pub struct DagEntry<K: DagKey, M: DagMetadata = ()> {
     /// Predecessor entries this entry builds upon (parent tips)
     predecessors: Vec<K>,
+    metadata: M,
 }
 
-impl<K: DagKey> DagEntry<K> {
+impl<K: DagKey, M: DagMetadata> DagEntry<K, M> {
     /// Get the predecessors of this entry
     #[inline]
     pub fn predecessors(&self) -> &[K] {
         &self.predecessors
+    }
+
+    /// Get the metadata of this entry
+    #[inline]
+    pub fn metadata(&self) -> &M {
+        &self.metadata
+    }
+
+    pub fn consume(self) -> (Vec<K>, M) {
+        (self.predecessors, self.metadata)
     }
 }
 
@@ -47,18 +58,26 @@ where
     T: Serializable + Clone + Eq + Hash + Ord + Debug + Send + Sync,
 {}
 
-impl<K: DagKey> Serializable for DagEntry<K> {
+/// Trait bounds for DAG metadata stored in each entry (e.g. block header data).
+/// The user can define their own metadata type as long as it satisfies these bounds.
+pub trait DagMetadata: Serializable + Send + Sync {}
+
+impl<T> DagMetadata for T where T: Serializable + Send + Sync {}
+
+impl<K: DagKey, M: DagMetadata> Serializable for DagEntry<K, M> {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        self.predecessors.write(writer)
+        self.predecessors.write(writer)?;
+        self.metadata.write(writer)
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         let predecessors = Vec::<K>::read(reader)?;
-        Ok(DagEntry { predecessors })
+        let metadata = M::read(reader)?;
+        Ok(DagEntry { predecessors, metadata })
     }
 
     fn size(&self) -> usize {
-        self.predecessors.size()
+        self.predecessors.size() + self.metadata.size()
     }
 }
 
@@ -129,7 +148,7 @@ impl Serializable for DagChangeKey<'_> {
 /// The `DagState` is parameterized by:
 /// - `K`: The key type for identifying entries (e.g. `[u8; 32]` for block hashes)
 /// - `B`: The storage backend (e.g. `MemoryBackend` or a disk-based backend)
-pub struct DagState<K: DagKey, B: Backend> {
+pub struct DagState<K: DagKey, B: Backend, M: DagMetadata = ()> {
     /// The backend engine for persisting entries
     engine: XoriEngine<B>,
     /// Column used to store DagEntry metadata (predecessors + order), keyed by K
@@ -137,10 +156,10 @@ pub struct DagState<K: DagKey, B: Backend> {
     /// Column used to store individual changes, keyed by composite `(K, Column, data_key)`
     changes_column: Column,
     /// Phantom data for the key type
-    _phantom: PhantomData<K>,
+    _phantom: PhantomData<(K, M)>,
 }
 
-impl<K: DagKey, B: Backend> DagState<K, B> {
+impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
     /// Create a new DagState with the given backend.
     pub async fn new(mut builder: XoriBuilder, backend: B) -> DagResult<Self, B::Error> {
         let entries_column = builder.register_column(ColumnKind::Other);
@@ -272,6 +291,7 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
         &mut self,
         key: K,
         predecessors: Vec<K>,
+        metadata: M,
         snapshot: Snapshot,
     ) -> DagResult<(), B::Error> {
         // Check that entry doesn't already exist
@@ -286,7 +306,7 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
             }
         }
 
-        let entry = DagEntry { predecessors };
+        let entry = DagEntry { predecessors, metadata };
 
         // Write entry metadata
         self.engine
@@ -488,16 +508,30 @@ impl<K: DagKey> DagEntryBuilder<K> {
     }
 
     /// Consume the builder and commit the entry into the DAG.
+    #[inline(always)]
     pub async fn commit<B: Backend>(
         self,
         dag: &mut DagState<K, B>,
         key: K,
     ) -> DagResult<(), B::Error> {
-        dag.add_entry(key, self.predecessors, self.snapshot)
+        dag.add_entry(key, self.predecessors, (), self.snapshot)
+            .await
+    }
+
+    /// Consume the builder and commit the entry with metadata into the DAG.
+    #[inline(always)]
+    pub async fn commit_with_metadata<B: Backend, M: DagMetadata>(
+        self,
+        dag: &mut DagState<K, B, M>,
+        key: K,
+        metadata: M,
+    ) -> DagResult<(), B::Error> {
+        dag.add_entry(key, self.predecessors, metadata, self.snapshot)
             .await
     }
 
     /// Consume the builder and return the changes without committing.
+    #[inline(always)]
     pub fn build(self) -> (Vec<K>, Snapshot) {
         (self.predecessors, self.snapshot)
     }
