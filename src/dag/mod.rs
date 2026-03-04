@@ -7,7 +7,7 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 
 pub use error::{DagError, DagResult};
-use futures::{Stream, TryStreamExt, stream};
+use futures::{Stream, StreamExt, TryStreamExt, pin_mut, stream};
 use indexmap::IndexSet;
 
 use crate::{SerializedBytes, Snapshot, XoriBuilder, XoriEngine};
@@ -169,7 +169,7 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
     }
 
     /// Get the predecessors of a given entry as a stream.
-    pub async fn predecessors<'a, KI: KeyInput<'a, K>>(&'a self, keys: KI) -> DagResult<impl Stream<Item = DagResult<K, B::Error>> + 'a, B::Error> {
+    pub async fn predecessors<'a, KI: KeyInput<'a, &'a K>>(&'a self, keys: KI) -> DagResult<impl Stream<Item = DagResult<K, B::Error>> + 'a, B::Error> {
         struct StreamState<K> {
             predecessors: VecDeque<K>,
             visited: HashSet<K>,
@@ -378,30 +378,17 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
         DK: Serializable + Send + Sync,
         V: Serializable + Send + Sync,
     {
-        let mut visited = HashSet::new();
-        // Stack for deterministic DFS using provided tip/predecessor order.
-        // Push in reverse to preserve forward processing order with LIFO pop.
-        let mut stack = Vec::new();
 
-        for tip in tips.iter().rev() {
-            if self.has_entry(tip).await? {
-                stack.push(Cow::Borrowed(tip));
-            }
-        }
+        // Walk through all the predecessors until the genesis, looking for the first entry that has a change for this key.
+        let predecessors = self.predecessors(tips.iter()).await?;
+        let stream = stream::iter(tips.iter().map(Cow::Borrowed).map(Ok))
+            .chain(predecessors.map_ok(Cow::Owned));
 
         let data_key_bytes = data_key.to_bytes()?;
 
-        while let Some(key) = stack.pop() {
-            if !visited.insert(key.clone()) {
-                continue;
-            }
-
-            let Some(entry) = self.get_entry(&key).await? else {
-                continue;
-            };
-
-            // Query the changes column for (entry_key, column, data_key)
-            let entry_key_bytes = key.to_bytes()?;
+        pin_mut!(stream);
+        while let Some(predecessor) = stream.try_next().await? {
+            let entry_key_bytes = predecessor.to_bytes()?;
 
             let change_key = DagChangeKey {
                 entry_key_bytes: entry_key_bytes.as_ref(),
@@ -415,17 +402,9 @@ impl<K: DagKey, B: Backend> DagState<K, B> {
 
             if let Some(change) = change_value {
                 return match change {
-                    Some(v) => Ok(ReadResult::Stored(v, key)),
-                    None => Ok(ReadResult::Deleted(key)),
+                    Some(v) => Ok(ReadResult::Stored(v, predecessor)),
+                    None => Ok(ReadResult::Deleted(predecessor)),
                 };
-            }
-
-            // Push predecessors into the stack in reverse order so they are
-            // popped/visited in stored predecessor order.
-            for pred in entry.predecessors.into_iter().rev() {
-                if self.has_entry(&pred).await? {
-                    stack.push(Cow::Owned(pred));
-                }
             }
         }
 
@@ -733,7 +712,7 @@ mod tests {
         // Pop 1 -> visit 1, no preds -> [2, 3]
         // Pop 2 -> visit 2, add 1 but already visited -> [3]
         // Pop 3 -> visit 3, add 1 but already visited -> []
-        let preds: Vec<u64> = dag.predecessors(iter::once(8u64)).await.unwrap()
+        let preds: Vec<u64> = dag.predecessors(iter::once(&8u64)).await.unwrap()
             .try_collect()
             .await
             .unwrap();
@@ -752,7 +731,7 @@ mod tests {
         assert_eq!(preds_by_level, vec![level4, level3, level2, level1]);
 
         // Verify predecessors from merge_2 (7)
-        let preds_7: Vec<u64> = dag.predecessors(iter::once(7u64)).await.unwrap()
+        let preds_7: Vec<u64> = dag.predecessors(iter::once(&7u64)).await.unwrap()
             .try_collect()
             .await
             .unwrap();
@@ -760,7 +739,7 @@ mod tests {
         assert_eq!(preds_7, vec![6, 9, 4, 5, 1, 2, 3]);
 
         // Verify predecessors from merge_1 (6)
-        let preds_6: Vec<u64> = dag.predecessors(iter::once(6u64)).await.unwrap()
+        let preds_6: Vec<u64> = dag.predecessors(iter::once(&6u64)).await.unwrap()
             .try_collect()
             .await
             .unwrap();
@@ -768,7 +747,7 @@ mod tests {
         assert_eq!(preds_6, vec![4, 5, 2, 3, 1]);
 
         // Get predecessors of 4 & 5 together, should be [2, 3, 1]
-        let preds_4_5: Vec<u64> = dag.predecessors(vec![4u64, 5u64]).await.unwrap()
+        let preds_4_5: Vec<u64> = dag.predecessors(vec![&4u64, &5u64]).await.unwrap()
             .try_collect()
             .await
             .unwrap();
