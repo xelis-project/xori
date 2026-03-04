@@ -1,13 +1,13 @@
 use std::{collections::{BTreeMap, HashMap}, fmt::Display};
 use futures::{stream, Stream};
 use itertools::Either;
-use crate::{Serializable, backend::BackendError, engine::{IteratorDirection, IteratorMode}};
+use crate::{Serializable, backend::{BackendError, ColumnId}, engine::{IteratorDirection, IteratorMode}};
 use super::{Backend, Column};
 use bytes::Bytes;
 
 #[derive(Debug, Clone, Default)]
 struct MemoryStore {
-    columns: HashMap<Column, BTreeMap<Bytes, Bytes>>,
+    columns: HashMap<ColumnId, BTreeMap<Bytes, Bytes>>,
 }
 
 /// In-memory backend implementation for testing
@@ -42,7 +42,7 @@ impl Backend for MemoryBackend {
     type Error = std::convert::Infallible;
     type RawBytes = Bytes;
 
-    async fn open_column(&self, _: &Column) -> Result<(), BackendError<Self::Error>> {
+    async fn open_column(&mut self, _: &Column) -> Result<(), BackendError<Self::Error>> {
         // No-op for memory backend - columns are created on demand
         Ok(())
     }
@@ -58,7 +58,7 @@ impl Backend for MemoryBackend {
 
         self.store
             .columns
-            .entry(*column)
+            .entry(column.id())
             .or_default()
             .insert(key_bytes, value_bytes);
 
@@ -74,7 +74,7 @@ impl Backend for MemoryBackend {
 
         Ok(self.store
             .columns
-            .get(&column)
+            .get(&column.id())
             .and_then(|col| col.get(&key_bytes).cloned()))
     }
 
@@ -85,7 +85,7 @@ impl Backend for MemoryBackend {
     ) -> Result<impl Stream<Item = Result<(Self::RawBytes, Self::RawBytes), BackendError<Self::Error>>> + 'a, BackendError<Self::Error>> {
         let entries = self.store
             .columns
-            .get(column)
+            .get(&column.id())
             .into_iter()
             .flat_map(move |col| {
                 match mode {
@@ -134,7 +134,7 @@ impl Backend for MemoryBackend {
     ) -> Result<(), BackendError<Self::Error>> {
         let key_bytes = serialize_data(key)?;
 
-        if let Some(col) = self.store.columns.get_mut(&column) {
+        if let Some(col) = self.store.columns.get_mut(&column.id()) {
             col.remove(&key_bytes);
         }
 
@@ -150,7 +150,7 @@ impl Backend for MemoryBackend {
 
         Ok(self.store
             .columns
-            .get(&column)
+            .get(&column.id())
             .map_or(false, |col| col.contains_key(&key_bytes))
         )
     }
@@ -168,17 +168,21 @@ impl Backend for MemoryBackend {
 
 #[cfg(test)]
 mod tests {
-    use crate::backend::ColumnKind;
+    use std::sync::Arc;
+
+    use crate::backend::{ColumnId, ColumnProperties, column::{ColumnInner, ColumnKind}};
 
     use super::*;
 
     #[tokio::test]
     async fn test_memory_backend_basic_operations() {
         let mut backend = MemoryBackend::new();
-        let column = Column {
-            id: 1,
+        let column = Arc::new(ColumnInner {
+            name: "test_entity".into(),
+            id: ColumnId(1),
             kind: ColumnKind::Entity,
-        };
+            properties: ColumnProperties { prefix_length: Some(4) },
+        });
 
         backend.open_column(&column).await.unwrap();
 
@@ -199,11 +203,12 @@ mod tests {
     #[tokio::test]
     async fn test_memory_backend_clear() {
         let mut backend = MemoryBackend::new();
-        let column = Column {
-            id: 1,
+        let column = Arc::new(ColumnInner {
+            name: "test_entity".into(),
+            id: ColumnId(1),
             kind: ColumnKind::Entity,
-        };
-
+            properties: ColumnProperties { prefix_length: Some(4) },
+        });
         backend.write(&column, 1u32, 100u64).await.unwrap();
         backend.clear().await.unwrap();
         assert!(!backend.exists(&column, &1u32).await.unwrap());

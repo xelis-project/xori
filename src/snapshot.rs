@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, HashMap, btree_map::Entry};
 use bytes::Bytes;
 use itertools::Either;
 
-use crate::{Column, engine::{IteratorDirection, IteratorMode}};
+use crate::{Column, backend::ColumnId, engine::{IteratorDirection, IteratorMode}};
 
 /// Represents the state of an entry in a snapshot, which can be stored, deleted, or absent (not modified in the snapshot)
 #[derive(Debug)]
@@ -37,20 +37,20 @@ pub struct ColumnSnapshot {
 pub struct Snapshot {
     // Maps columns to their modified entries in the snapshot
     // for each column, we have a map of key to either a stored value (if modified/added) or a deletion marker (if deleted)
-    pub(crate) columns: HashMap<Column, ColumnSnapshot>,
+    pub(crate) columns: HashMap<ColumnId, ColumnSnapshot>,
 }
 
 impl Snapshot {
     /// Get a mutable reference to the snapshot for a specific column, creating it if it doesn't exist
     #[inline]
-    pub fn column_mut(&mut self, column: Column) -> &mut ColumnSnapshot {
-        self.columns.entry(column).or_default()
+    pub fn column_mut(&mut self, column: &Column) -> &mut ColumnSnapshot {
+        self.columns.entry(column.id()).or_default()
     }
 
     /// Get an immutable reference to the snapshot for a specific column, if it exists
     #[inline]
     pub fn column(&self, column: &Column) -> Option<&ColumnSnapshot> {
-        self.columns.get(column)
+        self.columns.get(&column.id())
     }
 }
 

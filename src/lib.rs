@@ -8,6 +8,8 @@ pub mod snapshot;
 pub mod dag;
 
 pub use backend::{Backend, Column, BackendError, MemoryBackend};
+#[cfg(feature = "rocksdb")]
+pub use backend::RocksDBBackend;
 pub use entity::{Entity, EntityReadHandle};
 pub use engine::{XoriEngine, Result, XoriError};
 pub use serde::*;

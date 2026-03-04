@@ -1,70 +1,19 @@
 pub mod memory;
+pub mod column;
+
+#[cfg(feature = "rocksdb")]
+pub mod rocksdb;
+
 
 use futures::Stream;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use std::fmt::{self, Display};
-use crate::{Reader, ReaderError, Serializable, VarInt, Writable, WriterError, engine::IteratorMode};
+use std::fmt::Display;
+use crate::{ReaderError, Serializable, WriterError, engine::IteratorMode};
 
 pub use memory::MemoryBackend;
-
-/// Represents a database column/namespace for organizing data
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Column {
-    pub(crate) id: u32,
-    pub(crate) kind: ColumnKind,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum ColumnKind {
-    Entity,
-    Index,
-    Other,
-}
-
-impl Serializable for ColumnKind {
-    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        (*self as u8).write(writer)
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let value = u8::read(reader)?;
-        match value {
-            0 => Ok(ColumnKind::Entity),
-            1 => Ok(ColumnKind::Index),
-            2 => Ok(ColumnKind::Other),
-            _ => Err(ReaderError::UnexpectedValue),
-        }
-    }
-
-    fn size(&self) -> usize {
-        1
-    }
-}
-
-impl Serializable for Column {
-    fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        VarInt::from(self.id).write(writer)?;
-        self.kind.write(writer)
-    }
-
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let id = VarInt::read(reader)?;
-        let kind = ColumnKind::read(reader)?;
-        Ok(Column { id: id.0 as u32, kind })
-    }
-
-    fn size(&self) -> usize {
-        VarInt::from(self.id).size() + self.kind.size()
-    }
-}
-
-impl fmt::Display for Column {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Column({})", self.id)
-    }
-}
+pub use column::{Column, ColumnId, ColumnKind, ColumnInner, ColumnProperties};
+#[cfg(feature = "rocksdb")]
+pub use rocksdb::RocksDBBackend;
 
 #[derive(Debug, Error)]
 pub enum BackendError<B: Display> {
@@ -87,7 +36,7 @@ pub trait Backend {
     type RawBytes: AsRef<[u8]>;
 
     /// Open a column/namespace for use (e.g., for an entity type)
-    fn open_column(&self, column: &Column) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;
+    fn open_column(&mut self, column: &Column) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;
 
     /// Write data to the database
     fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&mut self, column: &Column, key: K, data: V) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;

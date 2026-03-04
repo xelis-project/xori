@@ -10,8 +10,9 @@ pub use error::{DagError, DagResult};
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut, stream};
 use indexmap::IndexSet;
 
+use crate::backend::column::ColumnKind;
 use crate::{SerializedBytes, Snapshot, XoriBuilder, XoriEngine};
-use crate::backend::{Backend, Column, ColumnKind};
+use crate::backend::{Backend, Column, ColumnId};
 use crate::engine::{IteratorDirection, IteratorMode, XoriBackend};
 use crate::serde::{Reader, ReaderError, Serializable, Writable, WriterError};
 
@@ -117,7 +118,7 @@ pub enum ReadResult<V, K> {
 /// This allows point-lookups during DAG traversal and prefix iteration
 /// for cleanup when removing an entry.
 struct DagChangeKey<'a> {
-    column: &'a Column,
+    column: ColumnId,
     entry_key_bytes: &'a [u8],
     data_key_bytes: &'a [u8],
 }
@@ -162,8 +163,8 @@ pub struct DagState<K: DagKey, B: Backend, M: DagMetadata = ()> {
 impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
     /// Create a new DagState with the given backend.
     pub async fn new(mut builder: XoriBuilder, backend: B) -> DagResult<Self, B::Error> {
-        let entries_column = builder.register_column(ColumnKind::Other);
-        let changes_column = builder.register_column(ColumnKind::Other);
+        let entries_column = builder.register_column("dag_entries", ColumnKind::Other, Default::default());
+        let changes_column = builder.register_column("dag_changes", ColumnKind::Other, Default::default());
 
         let engine = builder.build(backend).await?;
 
@@ -320,7 +321,7 @@ impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
             for (data_key, value) in snapshot.entries {
                 let data_key_bytes = data_key.to_bytes()?;
                 let change_key = DagChangeKey {
-                    column: &column,
+                    column,
                     entry_key_bytes: entry_key_bytes.as_ref(),
                     data_key_bytes: &data_key_bytes,
                 };
@@ -412,7 +413,7 @@ impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
 
             let change_key = DagChangeKey {
                 entry_key_bytes: entry_key_bytes.as_ref(),
-                column,
+                column: column.id(),
                 data_key_bytes: &data_key_bytes,
             };
 
@@ -480,7 +481,7 @@ impl<K: DagKey> DagEntryBuilder<K> {
     }
 
     /// Write a key-value pair into this entry's changes for the given column.
-    pub fn write<DK, V>(&mut self, column: Column, key: &DK, value: &V) -> Result<(), WriterError>
+    pub fn write<DK, V>(&mut self, column: &Column, key: &DK, value: &V) -> Result<(), WriterError>
     where
         DK: Serializable,
         V: Serializable,
@@ -495,7 +496,7 @@ impl<K: DagKey> DagEntryBuilder<K> {
     }
 
     /// Mark a key as deleted in this entry's changes for the given column.
-    pub fn delete<DK>(&mut self, column: Column, key: &DK) -> Result<(), WriterError>
+    pub fn delete<DK>(&mut self, column: &Column, key: &DK) -> Result<(), WriterError>
     where
         DK: Serializable,
     {
@@ -545,13 +546,13 @@ mod tests {
     use futures::TryStreamExt;
     use indexmap::IndexSet;
 
-    use crate::backend::{ColumnKind, MemoryBackend};
+    use crate::backend::{column::ColumnKind, MemoryBackend};
     use crate::dag::ReadResult;
     use crate::{DagEntryBuilder, DagState, XoriBuilder};
 
     async fn create_dag() -> (DagState<u64, MemoryBackend>, crate::Column) {
         let mut builder = XoriBuilder::new();
-        let data_column = builder.register_column(ColumnKind::Other);
+        let data_column = builder.register_column("data", ColumnKind::Other, Default::default());
         let dag = DagState::new(builder, MemoryBackend::new()).await.unwrap();
         (dag, data_column)
     }
@@ -571,15 +572,15 @@ mod tests {
         let (mut dag, column) = create_dag().await;
 
         let mut genesis = DagEntryBuilder::new(vec![]);
-        genesis.write(column, &1u8, &10u64).unwrap();
+        genesis.write(&column, &1u8, &10u64).unwrap();
         genesis.commit(&mut dag, 1).await.unwrap();
 
         let mut left = DagEntryBuilder::new(vec![1]);
-        left.write(column, &2u8, &20u64).unwrap();
+        left.write(&column, &2u8, &20u64).unwrap();
         left.commit(&mut dag, 2).await.unwrap();
 
         let mut right = DagEntryBuilder::new(vec![1]);
-        right.write(column, &3u8, &30u64).unwrap();
+        right.write(&column, &3u8, &30u64).unwrap();
         right.commit(&mut dag, 3).await.unwrap();
 
         let merge = DagEntryBuilder::new(vec![2, 3]);
@@ -604,15 +605,15 @@ mod tests {
         let (mut dag, column) = create_dag().await;
 
         let mut genesis = DagEntryBuilder::new(vec![]);
-        genesis.write(column, &1u8, &100u64).unwrap();
+        genesis.write(&column, &1u8, &100u64).unwrap();
         genesis.commit(&mut dag, 10).await.unwrap();
 
         let mut left = DagEntryBuilder::new(vec![10]);
-        left.write(column, &2u8, &200u64).unwrap();
+        left.write(&column, &2u8, &200u64).unwrap();
         left.commit(&mut dag, 20).await.unwrap();
 
         let mut right = DagEntryBuilder::new(vec![10]);
-        right.write(column, &3u8, &300u64).unwrap();
+        right.write(&column, &3u8, &300u64).unwrap();
         right.commit(&mut dag, 30).await.unwrap();
 
         // Historical view at genesis: only key 1 exists.
@@ -644,23 +645,23 @@ mod tests {
         let right_only = 11u8;
 
         let mut genesis = DagEntryBuilder::new(vec![]);
-        genesis.write(column, &shared, &1u64).unwrap();
+        genesis.write(&column, &shared, &1u64).unwrap();
         genesis.commit(&mut dag, 100).await.unwrap();
 
         let mut left_1 = DagEntryBuilder::new(vec![100]);
-        left_1.write(column, &left_only, &200u64).unwrap();
+        left_1.write(&column, &left_only, &200u64).unwrap();
         left_1.commit(&mut dag, 200).await.unwrap();
 
         let mut left_2 = DagEntryBuilder::new(vec![200]);
-        left_2.write(column, &shared, &400u64).unwrap();
+        left_2.write(&column, &shared, &400u64).unwrap();
         left_2.commit(&mut dag, 400).await.unwrap();
 
         let mut right_1 = DagEntryBuilder::new(vec![100]);
-        right_1.write(column, &right_only, &300u64).unwrap();
+        right_1.write(&column, &right_only, &300u64).unwrap();
         right_1.commit(&mut dag, 300).await.unwrap();
 
         let mut right_2 = DagEntryBuilder::new(vec![300]);
-        right_2.write(column, &shared, &500u64).unwrap();
+        right_2.write(&column, &shared, &500u64).unwrap();
         right_2.commit(&mut dag, 500).await.unwrap();
 
         let merge = DagEntryBuilder::new(vec![400, 500]);

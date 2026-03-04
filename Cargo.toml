@@ -11,6 +11,13 @@ anyhow = "1.0.102"
 bytes = "1.11.1"
 itertools = "0.14.0"
 indexmap = "2.13.0"
+rocksdb = { version = "0.21", optional = true }
+
+[features]
+default = ["rocksdb"]
+rocksdb = ["dep:rocksdb"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
+tempfile = "3"
+

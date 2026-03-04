@@ -21,7 +21,7 @@ pub enum SearchBias {
 }
 
 /// Versioned entry for storing entity data along with its version
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct KeyIndexColumn {
     pub(crate) key_to_id: Column,
     pub(crate) id_to_key: Column,
@@ -80,7 +80,7 @@ mod tests {
     async fn setup_entity_handle() -> EntityWriteHandle<'static, TestEntity, MemoryBackend> {
         let backend = MemoryBackend::new();
         let engine = XoriBuilder::new()
-            .register_entity::<TestEntity>(EntityConfig { key_indexing: true })
+            .register_entity::<TestEntity>(EntityConfig { key_indexing: true, prefix_length: None })
             .build(backend).await.unwrap();
 
         let engine = Box::leak(Box::new(engine));

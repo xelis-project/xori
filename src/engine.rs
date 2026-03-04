@@ -8,7 +8,7 @@ use futures::{Stream, StreamExt, stream};
 use crate::builder::EntityInfo;
 use crate::snapshot::EntryState;
 use crate::{BackendError, EntityReadHandle, Serializable, Snapshot};
-use crate::backend::{Backend, Column};
+use crate::backend::{Backend, Column, ColumnId};
 use crate::entity::{Entity, EntityWriteHandle};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
@@ -21,6 +21,8 @@ pub struct XoriBackend<B: Backend> {
     pub(crate) backend: B,
     /// Memory snapshot for pending changes that have not yet been committed to the backend
     pub(crate) snapshot: Option<Snapshot>,
+    /// Set of columns that have been registered
+    pub(crate) columns: HashMap<ColumnId, Column>,
 }
 
 impl<B: Backend> XoriBackend<B> {
@@ -39,7 +41,8 @@ impl<B: Backend> XoriBackend<B> {
 
     /// Apply a snapshot of changes to the backend, writing all modified entries and deletions
     pub async fn apply_snapshot(&mut self, snapshot: Snapshot) -> Result<(), B::Error> {
-        for (column, column_snapshot) in snapshot.columns {
+        for (column_id, column_snapshot) in snapshot.columns {
+            let column = self.columns.get(&column_id).unwrap();
             for (key, value) in column_snapshot.entries {
                 match value {
                     Some(value) => self.backend.write(&column, key.as_ref(), value.as_ref()).await.map_err(XoriError::Backend)?,
@@ -84,7 +87,7 @@ impl<B: Backend> XoriBackend<B> {
     /// Write a value to the backend for a given column and key
     #[inline]
     pub async fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&mut self, column: &Column, key: K, value: V) -> Result<(), B::Error> {
-        match self.snapshot.as_mut().map(|snapshot| snapshot.column_mut(column.clone())) {
+        match self.snapshot.as_mut().map(|snapshot| snapshot.column_mut(column)) {
             Some(snapshot) => {
                 let key = key.to_bytes()?;
                 let value = value.to_bytes()?;
