@@ -2,7 +2,7 @@ mod read;
 mod write;
 
 use crate::{
-    Backend, Key, KeyIndex, Result, Serializable, Version, backend::Column, engine::XoriBackend
+    Backend, Key, KeyIndex, XoriResult, Serializable, Version, backend::Column, engine::XoriBackend
 };
 pub use read::EntityReadHandle;
 pub use write::EntityWriteHandle;
@@ -30,7 +30,7 @@ pub(crate) struct KeyIndexColumn {
 /// Get the key for a raw key, if key indexing is enabled
 /// Returns None only if key indexing is enabled but the key does not exist
 #[inline]
-pub(crate) async fn fetch_key_index<K: Serializable + Send + Sync, B: Backend>(backend: &XoriBackend<B>, index: Option<&KeyIndexColumn>, key: K) -> Result<Option<Key<K>>, B::Error> {
+pub(crate) async fn fetch_key_index<K: Serializable + Send + Sync, B: Backend>(backend: &XoriBackend<B>, index: Option<&KeyIndexColumn>, key: K) -> XoriResult<Option<Key<K>>, B::Error> {
     match index {
         Some(index) => backend.read::<_, KeyIndex>(&index.key_to_id, key).await
             .map(|opt| opt.map(Key::Indexed)),
@@ -40,7 +40,7 @@ pub(crate) async fn fetch_key_index<K: Serializable + Send + Sync, B: Backend>(b
 
 /// Get the latest version for the specified mapped key
 #[inline(always)]
-pub(crate) async fn version<K: Serializable + Send + Sync, B: Backend>(backend: &XoriBackend<B>, column: &Column, key: &K) -> Result<Option<Version>, B::Error> {
+pub(crate) async fn version<K: Serializable + Send + Sync, B: Backend>(backend: &XoriBackend<B>, column: &Column, key: &K) -> XoriResult<Option<Version>, B::Error> {
     backend.read(column, key).await
 }
 

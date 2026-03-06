@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use crate::{Backend, Column, Entity, XoriEngine, backend::{ColumnId, ColumnProperties, column::{ColumnInner, ColumnKind}}, engine::{Result, XoriBackend}, entity::KeyIndexColumn};
+use crate::{Backend, Column, Entity, XoriEngine, backend::{ColumnId, ColumnProperties, column::{ColumnInner, ColumnKind}}, engine::{XoriResult, XoriBackend}, entity::KeyIndexColumn};
 
 #[derive(Clone, Debug)]
 pub(crate) struct EntityInfo {
@@ -72,14 +72,14 @@ impl XoriBuilder {
 
     /// Build the Xori engine with the given backend
     #[inline]
-    pub async fn build<B: Backend>(self, mut backend: B) -> Result<XoriEngine<B>, B::Error> {
+    pub async fn build<B: Backend>(self, mut backend: B) -> XoriResult<XoriEngine<B>, B::Error> {
         // Open all columns for registered entities
         for column in self.columns.values() {
             backend.open_column(column).await?;
         }
 
         Ok(XoriEngine {
-            backend: XoriBackend { backend, snapshot: None, columns: self.columns },
+            backend: XoriBackend { backend, columns: self.columns },
             entity_registry: self.entity_registry,
         })
     }

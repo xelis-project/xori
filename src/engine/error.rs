@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-use crate::{ReaderError, WriterError, backend::BackendError};
+use crate::{ReaderError, WriterError, backend::{BackendError, ColumnId}};
 
 
 /// Database errors
@@ -12,6 +12,8 @@ pub enum XoriError<T: Display> {
     SnapshotActive,
     #[error("Column already registered")]
     ColumnAlreadyRegistered,
+    #[error("Unknown column: {0}")]
+    UnknownColumn(ColumnId),
     #[error("Key not found")]
     KeyNotFound,
     #[error("Column not found")]
@@ -37,4 +39,4 @@ impl<T: Display> From<ReaderError> for XoriError<T> {
 }
 
 /// Result type for backend operations
-pub type Result<T, E> = std::result::Result<T, XoriError<E>>;
+pub type XoriResult<T, E> = std::result::Result<T, XoriError<E>>;

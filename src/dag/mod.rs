@@ -11,7 +11,7 @@ use futures::{Stream, StreamExt, TryStreamExt, pin_mut, stream};
 use indexmap::IndexSet;
 
 use crate::backend::column::ColumnKind;
-use crate::{SerializedBytes, Snapshot, XoriBuilder, XoriEngine};
+use crate::{SerializedBytes, Changes, XoriBuilder, XoriEngine};
 use crate::backend::{Backend, Column, ColumnId};
 use crate::engine::{IteratorDirection, IteratorMode, XoriBackend};
 use crate::serde::{Reader, ReaderError, Serializable, Writable, WriterError};
@@ -293,7 +293,7 @@ impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
         key: K,
         predecessors: Vec<K>,
         metadata: M,
-        snapshot: Snapshot,
+        snapshot: Changes,
     ) -> DagResult<(), B::Error> {
         // Check that entry doesn't already exist
         if self.has_entry(&key).await? {
@@ -399,7 +399,6 @@ impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
         DK: Serializable + Send + Sync,
         V: Serializable + Send + Sync,
     {
-
         // Walk through all the predecessors until the genesis, looking for the first entry that has a change for this key.
         let predecessors = self.predecessors(tips.iter()).await?;
         let stream = stream::iter(tips.iter().map(Cow::Borrowed).map(Ok))
@@ -468,7 +467,7 @@ impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
 /// the entry into the DAG.
 pub struct DagEntryBuilder<K: DagKey> {
     predecessors: Vec<K>,
-    snapshot: Snapshot,
+    snapshot: Changes,
 }
 
 impl<K: DagKey> DagEntryBuilder<K> {
@@ -476,7 +475,7 @@ impl<K: DagKey> DagEntryBuilder<K> {
     pub fn new(predecessors: Vec<K>) -> Self {
         Self {
             predecessors,
-            snapshot: Snapshot::default(),
+            snapshot: Changes::default(),
         }
     }
 
@@ -533,7 +532,7 @@ impl<K: DagKey> DagEntryBuilder<K> {
 
     /// Consume the builder and return the changes without committing.
     #[inline(always)]
-    pub fn build(self) -> (Vec<K>, Snapshot) {
+    pub fn build(self) -> (Vec<K>, Changes) {
         (self.predecessors, self.snapshot)
     }
 }

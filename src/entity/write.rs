@@ -7,7 +7,7 @@ use crate::{
     EntityReadHandle,
     Key,
     KeyIndex,
-    Result,
+    XoriResult,
     Serializable,
     Version,
     VersionedKey,
@@ -26,32 +26,32 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
     /// Get the key for a raw key, if key indexing is enabled
     /// Returns None only if key indexing is enabled but the key does not exist
     #[inline(always)]
-    async fn fetch_key_index<K: Serializable + Send + Sync>(&self, key: K) -> Result<Option<Key<K>>, B::Error> {
+    async fn fetch_key_index<K: Serializable + Send + Sync>(&self, key: K) -> XoriResult<Option<Key<K>>, B::Error> {
         super::fetch_key_index(self.backend, self.info.key_index_column.as_ref(), key).await
     }
 
     /// Get the latest version for the specified mapped key
     #[inline(always)]
-    async fn version<K: Serializable + Send + Sync>(&self, key: &K) -> Result<Option<Version>, B::Error> {
+    async fn version<K: Serializable + Send + Sync>(&self, key: &K) -> XoriResult<Option<Version>, B::Error> {
         super::version(self.backend, &self.info.column, key).await
     }
 
     /// Read the entity metadata
     /// TODO: cache it
     #[inline(always)]
-    pub(crate) async fn metadata(&self) -> Result<EntityMetadata, B::Error> {
+    pub(crate) async fn metadata(&self) -> XoriResult<EntityMetadata, B::Error> {
         self.backend.read(&self.info.column, &()).await
             .map(Option::unwrap_or_default)
     }
 
     /// Update the entity metadata
     #[inline(always)]
-    async fn update_metadata(&mut self, metadata: &EntityMetadata) -> Result<(), B::Error> {
+    async fn update_metadata(&mut self, metadata: &EntityMetadata) -> XoriResult<(), B::Error> {
         self.backend.write(&self.info.column, &(), metadata).await
     }
 
     /// Map a raw key to either a raw key or an indexed key, depending on whether key indexing is enabled
-    async fn get_or_create_key<K: Serializable + Send + Sync>(&mut self, key: K) -> Result<Key<K>, B::Error> {
+    async fn get_or_create_key<K: Serializable + Send + Sync>(&mut self, key: K) -> XoriResult<Key<K>, B::Error> {
         match self.info.key_index_column.as_ref() {
             Some(index) => {
                 let id = self.backend.read::<_, KeyIndex>(&index.key_to_id, &key).await
@@ -79,12 +79,12 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
     }
 
     /// Update the latest version for a key
-    async fn update_version<K: Serializable + Send + Sync>(&mut self, key: &K, version: Version) -> Result<(), B::Error> {
+    async fn update_version<K: Serializable + Send + Sync>(&mut self, key: &K, version: Version) -> XoriResult<(), B::Error> {
         self.backend.write(&self.info.column, key, &version).await
     }
 
     /// Store a new version of the entity for the given key
-    pub async fn store<K: Serializable + Send + Sync>(&mut self, key: K, value: E) -> Result<(), B::Error> {
+    pub async fn store<K: Serializable + Send + Sync>(&mut self, key: K, value: E) -> XoriResult<(), B::Error> {
         // Map the key if required
         let key = self.get_or_create_key(key).await?;
 
@@ -105,7 +105,7 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
     }
 
     /// Store a deletion entry for the given key, which will be interpreted as a deletion of the latest version
-    pub async fn store_deleted<K: Serializable + Send + Sync>(&mut self, key: K) -> Result<(), B::Error> {
+    pub async fn store_deleted<K: Serializable + Send + Sync>(&mut self, key: K) -> XoriResult<(), B::Error> {
         // Map the key if required
         let key = self.get_or_create_key(key).await?;
 
@@ -128,7 +128,7 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
 
     /// Delete versions at or above the specified version for the given key
     /// This is used for rolling back to a previous version by deleting all newer versions
-    pub async fn delete_until_version<K: Serializable + Send + Sync>(&mut self, key: &K, version: Version) -> Result<(), B::Error> {
+    pub async fn delete_until_version<K: Serializable + Send + Sync>(&mut self, key: &K, version: Version) -> XoriResult<(), B::Error> {
         match self.fetch_key_index(key).await? {
             Some(mapped_key) => {
                 let Some(last_version) = self.version(&mapped_key).await? else {
@@ -172,7 +172,7 @@ impl<'engine, E: Entity, B: Backend> EntityWriteHandle<'engine, E, B> {
         }
     }
 
-    pub async fn delete<K: Serializable + Send + Sync>(&mut self, initial_key: K) -> Result<(), B::Error> {
+    pub async fn delete<K: Serializable + Send + Sync>(&mut self, initial_key: K) -> XoriResult<(), B::Error> {
         match self.fetch_key_index(&initial_key).await? {
             Some(mapped_key) => {
                 let Some(mut version) = self.version(&mapped_key).await? else {

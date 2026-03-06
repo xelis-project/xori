@@ -1,49 +1,38 @@
 mod error;
 mod iterator;
 
-use bytes::Bytes;
-use futures::future::Either;
-use futures::{Stream, StreamExt, stream};
+use futures::{Stream, StreamExt};
 
 use crate::builder::EntityInfo;
-use crate::snapshot::EntryState;
-use crate::{BackendError, EntityReadHandle, Serializable, Snapshot};
+use crate::snapshot::Snapshot;
+use crate::{BackendError, EntityReadHandle, Serializable, Changes};
 use crate::backend::{Backend, Column, ColumnId};
 use crate::entity::{Entity, EntityWriteHandle};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 
-pub use error::{XoriError, Result};
+pub use error::{XoriError, XoriResult};
 pub use iterator::{IteratorDirection, IteratorMode};
 
 /// The main Xori database engine wrapper around the backend and entity registry
 pub struct XoriBackend<B: Backend> {
     pub(crate) backend: B,
-    /// Memory snapshot for pending changes that have not yet been committed to the backend
-    pub(crate) snapshot: Option<Snapshot>,
     /// Set of columns that have been registered
     pub(crate) columns: HashMap<ColumnId, Column>,
 }
 
 impl<B: Backend> XoriBackend<B> {
-    /// Create a new snapshot for batching changes
-    /// if a snapshot already exists, it will clone it
-    #[inline]
-    pub fn create_snapshot(&self) -> Snapshot {
-        self.snapshot.clone().unwrap_or_default()
-    }
-
-    /// Swap the current snapshot with a new one, returning the old snapshot if it exists
-    #[inline]
-    pub fn swap_snapshot(&mut self, snapshot: Option<Snapshot>) -> Option<Snapshot> {
-        std::mem::replace(&mut self.snapshot, snapshot)
+    /// Create a new snapshot of the current state of the engine, including pending changes
+    pub fn create_snapshot<'a>(&'a self) -> Snapshot<'a, B> {
+        Snapshot::new(self, Changes::default())
     }
 
     /// Apply a snapshot of changes to the backend, writing all modified entries and deletions
-    pub async fn apply_snapshot(&mut self, snapshot: Snapshot) -> Result<(), B::Error> {
-        for (column_id, column_snapshot) in snapshot.columns {
-            let column = self.columns.get(&column_id).unwrap();
-            for (key, value) in column_snapshot.entries {
+    pub async fn apply_changes(&mut self, changes: Changes) -> XoriResult<(), B::Error> {
+        for (column_id, column_changes) in changes.columns {
+            let column = self.columns.get(&column_id)
+                .ok_or_else(|| XoriError::UnknownColumn(column_id))?;
+            for (key, value) in column_changes.entries {
                 match value {
                     Some(value) => self.backend.write(&column, key.as_ref(), value.as_ref()).await.map_err(XoriError::Backend)?,
                     None => self.backend.delete(&column, key.as_ref()).await.map_err(XoriError::Backend)?,
@@ -55,26 +44,14 @@ impl<B: Backend> XoriBackend<B> {
 
     /// Clear all data from the database
     #[inline]
-    pub async fn clear(&mut self) -> Result<(), B::Error> {
-        if self.snapshot.is_some() {
-            return Err(XoriError::SnapshotActive.into());
-        }
-
+    pub async fn clear(&mut self) -> XoriResult<(), B::Error> {
         self.backend.clear().await
             .map_err(XoriError::Backend)
     }
 
     /// Read a value from the backend for a given column and key
     #[inline]
-    pub async fn read<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: &Column, key: K) -> Result<Option<V>, B::Error> {
-        if let Some(snapshot) = self.snapshot.as_ref().and_then(|snapshot| snapshot.column(column)) {
-            match snapshot.get(key.to_bytes()?) {
-                EntryState::Stored(bytes) => return V::from_bytes(bytes.as_ref()).map(Some).map_err(XoriError::from),
-                EntryState::Deleted => return Ok(None),
-                EntryState::Absent => {}
-            };
-        }
-
+    pub async fn read<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: &Column, key: K) -> XoriResult<Option<V>, B::Error> {
         self.backend.read(column, key).await
             .and_then(|bytes| bytes
                     .map(|bytes| V::from_bytes(bytes.as_ref())
@@ -86,78 +63,38 @@ impl<B: Backend> XoriBackend<B> {
 
     /// Write a value to the backend for a given column and key
     #[inline]
-    pub async fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&mut self, column: &Column, key: K, value: V) -> Result<(), B::Error> {
-        match self.snapshot.as_mut().map(|snapshot| snapshot.column_mut(column)) {
-            Some(snapshot) => {
-                let key = key.to_bytes()?;
-                let value = value.to_bytes()?;
-
-                snapshot.insert(Bytes::copy_from_slice(&key), Bytes::copy_from_slice(&value));
-                Ok(())
-            },
-            None => self.backend.write(column, key, value).await
-                .map_err(XoriError::Backend)
-        }
+    pub async fn write<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&mut self, column: &Column, key: K, value: V) -> XoriResult<(), B::Error> {
+        self.backend.write(column, key, value).await.map_err(XoriError::Backend)
     }
 
     /// Iterate over all entries with keys that start with the given prefix
-    pub async fn iterator<'a, K, V>(&'a self, column: &'a Column, mode: IteratorMode<'a>) -> Result<impl Stream<Item = Result<(K, V), B::Error>> + 'a, B::Error>
+    pub async fn iterator<'a, K, V>(&'a self, column: &'a Column, mode: IteratorMode<'a>) -> XoriResult<impl Stream<Item = XoriResult<(K, V), B::Error>> + 'a, B::Error>
     where
         K: Serializable + Send + Sync + 'a,
         V: Serializable + Send + Sync + 'a,
     {
-        match self.snapshot.as_ref().and_then(|snapshot| snapshot.column(column)) {
-            Some(snapshot) => {
-                let iter = snapshot.iterator(mode).map(|(key, value)| {
-                        let key = K::from_bytes(key).map_err(XoriError::from)?;
-                        let value = V::from_bytes(value).map_err(XoriError::from)?;
-                        Ok((key, value))
-                    });
-
-                let stream = stream::iter(iter);
-
-                let backend_stream = self.backend.iterator(column, mode).await?
-                    .map(|item| {
-                        let (key, value) = item.map_err(XoriError::from)?;
-                        if snapshot.contains(&key).unwrap_or(false) {
-                            Ok::<Option<(K, V)>, XoriError<B::Error>>(None)
-                        } else {
-                            let key = K::from_bytes(key).map_err(XoriError::from)?;
-                            let value = V::from_bytes(value).map_err(XoriError::from)?;
-                            Ok(Some((key, value)))
-                        }
-                    })
-                    .filter_map(|item| futures::future::ready(match item {
-                        Ok(Some(kv)) => Some(Ok(kv)),
-                        Ok(None) => None,
-                        Err(e) => Some(Err(e)),
-                    }));
-
-                Ok(Either::Left(stream.chain(backend_stream)))
-            },
-            None => match self.backend.iterator(column, mode).await {
-                Ok(stream) => Ok(Either::Right(stream.map(|item| match item {
-                    Ok((key, value)) => {
-                        let key = K::from_bytes(key)?;
-                        let value = V::from_bytes(value)?;
-                        Ok((key, value))
-                    },
-                    Err(e) => Err(XoriError::Backend(e)),
-                }))),
+        match self.backend.iterator(column, mode).await {
+            Ok(stream) => Ok(stream.map(|item| match item {
+                Ok((key, value)) => {
+                    let key = K::from_bytes(key)?;
+                    let value = V::from_bytes(value)?;
+                    Ok((key, value))
+                },
                 Err(e) => Err(XoriError::Backend(e)),
-            }
+            })),
+            Err(e) => Err(XoriError::Backend(e)),
         }
     }
 
     /// Iterator over all available keys in a column
     #[inline(always)]
-    pub async fn iterator_keys<'a, K: Serializable + Send + Sync + 'a>(&'a self, column: &'a Column, mode: IteratorMode<'a>) -> Result<impl Stream<Item = Result<K, B::Error>> + 'a, B::Error> {
+    pub async fn iterator_keys<'a, K: Serializable + Send + Sync + 'a>(&'a self, column: &'a Column, mode: IteratorMode<'a>) -> XoriResult<impl Stream<Item = XoriResult<K, B::Error>> + 'a, B::Error> {
         self.iterator::<K, ()>(column, mode).await
             .map(|stream| stream.map(|item| item.map(|(key, _)| key)))
     }
 
     /// Delete a key from the backend for a given column
-    pub async fn delete<K: Serializable + Send + Sync>(&mut self, column: &Column, key: K) -> Result<(), B::Error> {
+    pub async fn delete<K: Serializable + Send + Sync>(&mut self, column: &Column, key: K) -> XoriResult<(), B::Error> {
         self.backend.delete(column, key).await
             .map_err(XoriError::Backend)
     }
