@@ -11,9 +11,9 @@ use super::{Reader, ReaderError, Serializable, Writable, WriterError};
 /// - 0xFE + 4 bytes: u32 value (65536-4294967295)
 /// - 0xFF + 8 bytes: u64 value (4294967296+)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
-pub struct VarInt(pub u64);
+pub struct VarUint(pub u64);
 
-impl VarInt {
+impl VarUint {
     /// Create a new VarInt from a u64 value
     #[inline]
     pub const fn new(value: u64) -> Self {
@@ -47,19 +47,19 @@ impl VarInt {
     }
 }
 
-impl From<usize> for VarInt {
+impl From<usize> for VarUint {
     fn from(value: usize) -> Self {
         Self(value as u64)
     }
 }
 
-impl From<VarInt> for usize {
-    fn from(varint: VarInt) -> Self {
+impl From<VarUint> for usize {
+    fn from(varint: VarUint) -> Self {
         varint.0 as usize
     }
 }
 
-impl Serializable for VarInt {
+impl Serializable for VarUint {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         let value = self.0;
         
@@ -105,11 +105,11 @@ mod tests {
     #[test]
     fn test_varint_single_byte() {
         for value in [0, 1, 100, 252] {
-            let varint = VarInt(value);
+            let varint = VarUint(value);
             let bytes = varint.to_bytes().unwrap();
             assert_eq!(bytes.len(), 1);
             
-            let decoded = VarInt::from_bytes(&bytes).unwrap();
+            let decoded = VarUint::from_bytes(&bytes).unwrap();
             assert_eq!(decoded.0, value);
         }
     }
@@ -117,11 +117,11 @@ mod tests {
     #[test]
     fn test_varint_two_bytes() {
         for value in [253, 254, 255, 1000, 65535] {
-            let varint = VarInt(value);
+            let varint = VarUint(value);
             let bytes = varint.to_bytes().unwrap();
             assert_eq!(bytes.len(), 3); // prefix + 2 bytes
             
-            let decoded = VarInt::from_bytes(&bytes).unwrap();
+            let decoded = VarUint::from_bytes(&bytes).unwrap();
             assert_eq!(decoded.0, value);
         }
     }
@@ -129,11 +129,11 @@ mod tests {
     #[test]
     fn test_varint_four_bytes() {
         for value in [65536, 100000, 1000000, 0xFFFFFFFF] {
-            let varint = VarInt(value);
+            let varint = VarUint(value);
             let bytes = varint.to_bytes().unwrap();
             assert_eq!(bytes.len(), 5); // prefix + 4 bytes
             
-            let decoded = VarInt::from_bytes(&bytes).unwrap();
+            let decoded = VarUint::from_bytes(&bytes).unwrap();
             assert_eq!(decoded.0, value);
         }
     }
@@ -141,24 +141,24 @@ mod tests {
     #[test]
     fn test_varint_eight_bytes() {
         for value in [0x100000000u64, 0xFFFFFFFFFFFFFFFFu64] {
-            let varint = VarInt(value);
+            let varint = VarUint(value);
             let bytes = varint.to_bytes().unwrap();
             assert_eq!(bytes.len(), 9); // prefix + 8 bytes
             
-            let decoded = VarInt::from_bytes(&bytes).unwrap();
+            let decoded = VarUint::from_bytes(&bytes).unwrap();
             assert_eq!(decoded.0, value);
         }
     }
 
     #[test]
     fn test_varint_encoded_size() {
-        assert_eq!(VarInt::encoded_size(0), 1);
-        assert_eq!(VarInt::encoded_size(252), 1);
-        assert_eq!(VarInt::encoded_size(253), 3);
-        assert_eq!(VarInt::encoded_size(65535), 3);
-        assert_eq!(VarInt::encoded_size(65536), 5);
-        assert_eq!(VarInt::encoded_size(0xFFFFFFFF), 5);
-        assert_eq!(VarInt::encoded_size(0x100000000), 9);
+        assert_eq!(VarUint::encoded_size(0), 1);
+        assert_eq!(VarUint::encoded_size(252), 1);
+        assert_eq!(VarUint::encoded_size(253), 3);
+        assert_eq!(VarUint::encoded_size(65535), 3);
+        assert_eq!(VarUint::encoded_size(65536), 5);
+        assert_eq!(VarUint::encoded_size(0xFFFFFFFF), 5);
+        assert_eq!(VarUint::encoded_size(0x100000000), 9);
     }
 
     #[test]
@@ -166,9 +166,9 @@ mod tests {
         let boundaries = [0, 252, 253, 255, 256, 65535, 65536, 0xFFFFFFFF, 0x100000000];
         
         for &value in &boundaries {
-            let varint = VarInt(value);
+            let varint = VarUint(value);
             let bytes = varint.to_bytes().unwrap();
-            let decoded = VarInt::from_bytes(&bytes).unwrap();
+            let decoded = VarUint::from_bytes(&bytes).unwrap();
             assert_eq!(decoded.0, value, "Failed at boundary value {}", value);
         }
     }
@@ -176,7 +176,7 @@ mod tests {
     #[test]
     fn test_varint_size_matches_serialized() {
         for value in [0, 1, 252, 253, 1000, 65535, 65536, 1000000, 0x100000000u64, 0xFFFFFFFFFFFFFFFFu64] {
-            let varint = VarInt(value);
+            let varint = VarUint(value);
             let size = varint.size();
             let bytes = varint.to_bytes().unwrap();
             assert_eq!(size, bytes.len(), "Size mismatch for value {}", value);

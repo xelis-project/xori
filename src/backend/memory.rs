@@ -39,8 +39,17 @@ fn serialize_data<V: Serializable, E: Display>(data: V) -> Result<Bytes, Backend
 }
 
 impl Backend for MemoryBackend {
+    type Config = ();
     type Error = std::convert::Infallible;
     type RawBytes = Bytes;
+
+    async fn open(_: Self::Config, columns: &[Column]) -> Result<Self, BackendError<Self::Error>> {
+        let mut backend = Self::new();
+        for column in columns {
+            backend.open_column(column).await?;
+        }
+        Ok(backend)
+    }
 
     async fn open_column(&mut self, _: &Column) -> Result<(), BackendError<Self::Error>> {
         // No-op for memory backend - columns are created on demand
@@ -88,39 +97,11 @@ impl Backend for MemoryBackend {
             .get(&column.id())
             .into_iter()
             .flat_map(move |col| {
-                match mode {
-                    IteratorMode::All(direction) => Either::Left(Either::Left(match direction {
-                        IteratorDirection::Forward => Either::Left(col.iter()),
-                        IteratorDirection::Backward => Either::Right(col.iter().rev()),
-                    })),
-                    IteratorMode::Prefix(prefix, direction) => {
-                        let prefix = Bytes::copy_from_slice(prefix);
-                        let range = col.range(prefix.clone()..);
-
-                        Either::Left(Either::Right(match direction {
-                            IteratorDirection::Forward => Either::Left(range),
-                            IteratorDirection::Backward => Either::Right(range.rev()),
-                        }.into_iter().take_while(move |(k, _)| k.starts_with(&prefix))))
-                    },
-                    IteratorMode::Range { start, end, direction } => {
-                        let start = Bytes::copy_from_slice(start);
-                        let end = Bytes::copy_from_slice(end);
-                        let range = col.range(start..end);
-
-                        Either::Right(match direction {
-                            IteratorDirection::Forward => Either::Left(range),
-                            IteratorDirection::Backward => Either::Right(range.rev()),
-                        })
-                    },
-                    IteratorMode::From(start, direction) => {
-                        let start = Bytes::copy_from_slice(start);
-                        let range = col.range(start..);
-
-                        Either::Right(match direction {
-                            IteratorDirection::Forward => Either::Left(range),
-                            IteratorDirection::Backward => Either::Right(range.rev()),
-                        })
-                    },
+                let (lower, upper, direction) = mode.bounds();
+                let range = col.range((lower, upper));
+                match direction {
+                    IteratorDirection::Forward => Either::Left(range),
+                    IteratorDirection::Backward => Either::Right(range.rev()),
                 }.into_iter().map(|(k, v)| Ok((k.clone(), v.clone())))
             });
 

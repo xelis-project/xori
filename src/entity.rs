@@ -78,10 +78,9 @@ mod tests {
     }
 
     async fn setup_entity_handle() -> EntityWriteHandle<'static, TestEntity, MemoryBackend> {
-        let backend = MemoryBackend::new();
         let engine = XoriBuilder::new()
             .register_entity::<TestEntity>(EntityConfig { key_indexing: true, prefix_length: None })
-            .build(backend).await.unwrap();
+            .build::<MemoryBackend>(()).await.unwrap();
 
         let engine = Box::leak(Box::new(engine));
         engine.entity_handle_write::<TestEntity>().unwrap()

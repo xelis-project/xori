@@ -117,42 +117,11 @@ impl ColumnChanges {
     /// Get an iterator over the entries in this column snapshot, yielding (key, value) pairs
     #[inline]
     pub fn iterator<'a>(&'a self, mode: IteratorMode<'a>) -> impl Iterator<Item = (&'a Bytes, &'a Bytes)> + 'a {
-        match mode {
-            IteratorMode::All(direction) => Either::Left(Either::Left(match direction {
-                IteratorDirection::Forward => Either::Left(self.entries.iter()),
-                IteratorDirection::Backward => Either::Right(self.entries.iter().rev()),
-            })),
-            IteratorMode::Prefix(prefix, direction) => {
-                let prefix = Bytes::copy_from_slice(prefix);
-                let range = self.entries
-                    .range(prefix.clone()..);
-
-                Either::Left(Either::Right(match direction {
-                    IteratorDirection::Forward => Either::Left(range),
-                    IteratorDirection::Backward => Either::Right(range.rev()),
-                }.into_iter().take_while(move |(k, _)| k.starts_with(&prefix))))
-            },
-            IteratorMode::Range { start, end, direction } => {
-                let start = Bytes::copy_from_slice(start);
-                let end = Bytes::copy_from_slice(end);
-                let range = self.entries
-                    .range(start..end);
-
-                Either::Right(match direction {
-                    IteratorDirection::Forward => Either::Left(range),
-                    IteratorDirection::Backward => Either::Right(range.rev()),
-                })
-            },
-            IteratorMode::From(start, direction) => {
-                let start = Bytes::copy_from_slice(start);
-                let range = self.entries
-                    .range(start..);
-
-                Either::Right(match direction {
-                    IteratorDirection::Forward => Either::Left(range),
-                    IteratorDirection::Backward => Either::Right(range.rev()),
-                })
-            },
+        let (lower, upper, direction) = mode.bounds();
+        let range = self.entries.range((lower, upper));
+        match direction {
+            IteratorDirection::Forward => Either::Left(range),
+            IteratorDirection::Backward => Either::Right(range.rev()),
         }.into_iter().filter_map(|(k, v)| match v {
             Some(value) => Some((k, value)),
             None => None,

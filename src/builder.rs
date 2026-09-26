@@ -25,7 +25,9 @@ impl XoriBuilder {
     pub fn register_entity<E: Entity>(mut self, config: EntityConfig) -> Self {
         assert!(!self.entity_registry.contains_key(E::entity_name()), "Entity {} is already registered", E::entity_name());
         let prefix_length = if config.key_indexing {
-            Some(9) // Max encoded length of a VarInt for key indexing
+            // Indexed keys have variable width; no fixed prefix length can
+            // isolate the key from its version. Use bounded scans instead.
+            None
         } else {
             config.prefix_length
         };
@@ -34,8 +36,7 @@ impl XoriBuilder {
 
         let key_index_column = if config.key_indexing {
             let key_to_id = self.register_column(format!("{}_k2i", E::entity_name()), ColumnKind::Index, Default::default());
-            // set a prefix length of 9 because its the maximal encoded length of a VarInt
-            let id_to_key = self.register_column(format!("{}_i2k", E::entity_name()), ColumnKind::Index, ColumnProperties { prefix_length: Some(9) });
+            let id_to_key = self.register_column(format!("{}_i2k", E::entity_name()), ColumnKind::Index, Default::default());
 
             Some(KeyIndexColumn {
                 key_to_id,
@@ -70,13 +71,12 @@ impl XoriBuilder {
         column
     }
 
-    /// Build the Xori engine with the given backend
+    /// Open the backend with all registered columns, then build the engine.
     #[inline]
-    pub async fn build<B: Backend>(self, mut backend: B) -> XoriResult<XoriEngine<B>, B::Error> {
-        // Open all columns for registered entities
-        for column in self.columns.values() {
-            backend.open_column(column).await?;
-        }
+    pub async fn build<B: Backend>(self, config: B::Config) -> XoriResult<XoriEngine<B>, B::Error> {
+        let mut columns: Vec<_> = self.columns.values().cloned().collect();
+        columns.sort_by_key(|column| column.id());
+        let backend = B::open(config, &columns).await?;
 
         Ok(XoriEngine {
             backend: XoriBackend { backend, columns: self.columns },

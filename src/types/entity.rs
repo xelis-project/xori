@@ -1,4 +1,4 @@
-use crate::{KeyIndex, Reader, ReaderError, Serializable, VarInt, Writable, WriterError};
+use crate::{KeyIndex, Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 
 
 #[derive(Debug, Clone, Default)]
@@ -8,7 +8,7 @@ pub struct EntityMetadata {
 
 impl EntityMetadata {
     pub fn next_key_index(&mut self) -> KeyIndex {
-        let index = KeyIndex(VarInt(self.keys_count));
+        let index = KeyIndex(VarUint(self.keys_count));
         self.keys_count += 1;
         index
     }

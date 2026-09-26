@@ -3,7 +3,17 @@ use std::{cmp::Ordering, marker::PhantomData};
 use futures::{Stream, future::Either, stream};
 
 use crate::{
-    Backend, Entity, Key, XoriResult, Serializable, Version, VersionedKey, XoriError, builder::EntityInfo, engine::{IteratorDirection, IteratorMode, XoriBackend}, entity::SearchBias
+    Backend,
+    Entity,
+    Key,
+    XoriResult,
+    Serializable,
+    Version,
+    VersionedKey,
+    XoriError,
+    builder::EntityInfo,
+    engine::{IteratorDirection, IteratorMode, XoriBackend},
+    entity::SearchBias
 };
 
 /// Entity handle for managing a specific entity type with versioning

@@ -10,7 +10,7 @@ pub mod snapshot;
 
 pub use backend::{Backend, Column, BackendError, MemoryBackend};
 #[cfg(feature = "rocksdb")]
-pub use backend::RocksDBBackend;
+pub use backend::{RocksDBBackend, RocksDBConfig};
 pub use entity::{Entity, EntityReadHandle};
 pub use engine::{XoriEngine, XoriResult, XoriError};
 use futures::{Stream, future::Either};

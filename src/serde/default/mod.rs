@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use ::bytes::Bytes;
 
 use super::*;
-use crate::VarInt;
+use crate::VarUint;
 
 macro_rules! impl_serializable_integer {
     ($($ty:ty => $size:expr),+) => {
@@ -83,19 +83,19 @@ impl Serializable for () {
 impl Serializable for String {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         // Write length as VarInt, then raw UTF-8 bytes
-        VarInt(self.len() as u64).write(writer)?;
+        VarUint(self.len() as u64).write(writer)?;
         writer.extend_bytes(self.as_bytes());
         Ok(())
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let len = VarInt::read(reader)?.0 as usize;
+        let len = VarUint::read(reader)?.0 as usize;
         let bytes = reader.read_bytes_ref(len)?;
         String::from_utf8(bytes.to_vec()).map_err(|_| ReaderError::UnexpectedValue)
     }
 
     fn size(&self) -> usize {
-        VarInt::encoded_size(self.len()) + self.len()
+        VarUint::encoded_size(self.len()) + self.len()
     }
 }
 
@@ -148,7 +148,7 @@ impl<T: Serializable> Serializable for Option<T> {
 impl<T: Serializable> Serializable for Vec<T> {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         // Write length as VarInt
-        VarInt(self.len() as u64).write(writer)?;
+        VarUint(self.len() as u64).write(writer)?;
 
         // Write each element
         for item in self {
@@ -160,7 +160,7 @@ impl<T: Serializable> Serializable for Vec<T> {
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
         // Read length as VarInt
-        let len = VarInt::read(reader)?.value();
+        let len = VarUint::read(reader)?.value();
 
         // Pre-allocate vector
         let mut vec = Vec::with_capacity(len.min(1024) as usize); // Cap allocation for safety
@@ -174,7 +174,7 @@ impl<T: Serializable> Serializable for Vec<T> {
     }
 
     fn size(&self) -> usize {
-        let len_size = VarInt::encoded_size(self.len());
+        let len_size = VarUint::encoded_size(self.len());
         let items_size: usize = self.iter().map(|item| item.size()).sum();
         len_size + items_size
     }

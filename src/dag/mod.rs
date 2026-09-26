@@ -161,12 +161,12 @@ pub struct DagState<K: DagKey, B: Backend, M: DagMetadata = ()> {
 }
 
 impl<K: DagKey, B: Backend, M: DagMetadata> DagState<K, B, M> {
-    /// Create a new DagState with the given backend.
-    pub async fn new(mut builder: XoriBuilder, backend: B) -> DagResult<Self, B::Error> {
+    /// Register DAG columns before opening the backend with its configuration.
+    pub async fn new(mut builder: XoriBuilder, config: B::Config) -> DagResult<Self, B::Error> {
         let entries_column = builder.register_column("dag_entries", ColumnKind::Other, Default::default());
         let changes_column = builder.register_column("dag_changes", ColumnKind::Other, Default::default());
 
-        let engine = builder.build(backend).await?;
+        let engine = builder.build::<B>(config).await?;
 
         Ok(Self {
             engine,
@@ -552,7 +552,7 @@ mod tests {
     async fn create_dag() -> (DagState<u64, MemoryBackend>, crate::Column) {
         let mut builder = XoriBuilder::new();
         let data_column = builder.register_column("data", ColumnKind::Other, Default::default());
-        let dag = DagState::new(builder, MemoryBackend::new()).await.unwrap();
+        let dag = DagState::new(builder, ()).await.unwrap();
         (dag, data_column)
     }
 

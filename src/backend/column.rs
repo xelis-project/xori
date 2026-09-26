@@ -1,6 +1,6 @@
 use std::{borrow::{Borrow, Cow}, cmp::Ordering, fmt, hash::{Hash, Hasher}, sync::Arc};
 use serde::{Deserialize, Serialize};
-use crate::{Reader, ReaderError, Serializable, VarInt, Writable, WriterError};
+use crate::{Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 
 /// Unique identifier for a column/namespace in the database
 #[derive(Debug, PartialOrd, Ord, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -89,16 +89,16 @@ pub enum ColumnKind {
 
 impl Serializable for ColumnId {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        VarInt::from(self.0).write(writer)
+        VarUint::from(self.0).write(writer)
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let id = VarInt::read(reader)?;
+        let id = VarUint::read(reader)?;
         Ok(ColumnId(id.0))
     }
 
     fn size(&self) -> usize {
-        VarInt::from(self.0).size()
+        VarUint::from(self.0).size()
     }
 }
 

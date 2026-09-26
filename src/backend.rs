@@ -1,6 +1,9 @@
 pub mod memory;
 pub mod column;
 
+#[cfg(test)]
+mod tests;
+
 #[cfg(feature = "rocksdb")]
 pub mod rocksdb;
 
@@ -12,8 +15,9 @@ use crate::{ReaderError, Serializable, WriterError, engine::IteratorMode};
 
 pub use memory::MemoryBackend;
 pub use column::{Column, ColumnId, ColumnKind, ColumnInner, ColumnProperties};
+
 #[cfg(feature = "rocksdb")]
-pub use rocksdb::RocksDBBackend;
+pub use rocksdb::{RocksDBBackend, RocksDBConfig};
 
 #[derive(Debug, Error)]
 pub enum BackendError<B: Display> {
@@ -29,11 +33,18 @@ pub enum BackendError<B: Display> {
 
 /// Trait defining the interface for different database backends
 pub trait Backend {
+    /// Configuration used to create the backend after the schema is registered.
+    type Config: Send;
+
     /// Error type specific to the backend implementation
     type Error: Display;
 
     /// Raw bytes type returned by the backend for deserialization
     type RawBytes: AsRef<[u8]>;
+
+    /// Open the database with its complete schema, including existing columns.
+    fn open(config: Self::Config, columns: &[Column]) -> impl Future<Output = Result<Self, BackendError<Self::Error>>> + Send
+    where Self: Sized;
 
     /// Open a column/namespace for use (e.g., for an entity type)
     fn open_column(&mut self, column: &Column) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;

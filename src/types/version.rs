@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Reader, ReaderError, Serializable, VarInt, Writable, WriterError};
+use crate::{Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 
 
 /// Version identifier representing a point in history (e.g., topoheight)
@@ -21,16 +21,16 @@ impl Version {
 
 impl Serializable for Version {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        VarInt(self.0).write(writer)
+        VarUint(self.0).write(writer)
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        let value = VarInt::read(reader)?;
+        let value = VarUint::read(reader)?;
         Ok(Version(value.0))
     }
 
     fn size(&self) -> usize {
-        VarInt(self.0).size()
+        VarUint(self.0).size()
     }
 }
 

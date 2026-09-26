@@ -8,7 +8,7 @@ mod bytes;
 pub use writer::{Writable, WriterError};
 pub use reader::{Reader, ReaderError};
 pub use writable::WritableBytes;
-pub use varint::VarInt;
+pub use varint::VarUint;
 pub use bytes::SerializedBytes;
 
 /// Trait for types that can be serialized and deserialized by Xori

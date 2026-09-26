@@ -57,7 +57,7 @@ impl Serializable for Account {
         let balance = u64::read(reader)?;
         let owner_bytes = Vec::<u8>::read(reader)?;
         let owner = String::from_utf8(owner_bytes)
-            .map_err(|_| ReaderError::InvalidValue)?;
+            .map_err(|_| ReaderError::UnexpectedValue)?;
         Ok(Account { balance, owner })
     }
 
@@ -70,44 +70,47 @@ impl Serializable for Account {
 ### Basic Usage
 
 ```rust
-use xori::{XoriEngine, MemoryBackend};
-use std::sync::Arc;
+use xori::{EntityConfig, MemoryBackend, Version, XoriBuilder};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create engine with memory backend
-    let backend = Arc::new(MemoryBackend::new());
-    let engine = XoriEngine::new(backend);
+// Register the schema before creating the backend.
+let mut engine = XoriBuilder::new()
+    .register_entity::<Account>(EntityConfig::default())
+    .build::<MemoryBackend>(())
+    .await?;
 
-    // Register entity type
-    let accounts = engine.register::<Account>().await?;
+let account_id = 1u64;
+engine.entity_handle_write::<Account>().unwrap()
+    .store(account_id, Account { balance: 1000, owner: "Alice".into() })
+    .await?;
 
-    // Store versioned data
-    let account_id = 1u64;
-    accounts.store(account_id, Account {
-        balance: 1000,
-        owner: "Alice".to_string(),
-    }).await?;
-
-    // Update creates a new version
-    accounts.store(account_id, Account {
-        balance: 1500,
-        owner: "Alice".to_string(),
-    }).await?;
-
-    // Read latest version
-    if let Some((account, version)) = accounts.read(&account_id).await? {
-        println!("Balance: {} at version {:?}", account.balance, version);
-    }
-
-    // Read specific version
-    if let Some(account) = accounts.read_at_version(&account_id, Version(0)).await? {
-        println!("Initial balance: {}", account.balance);
-    }
-
-    Ok(())
+let accounts = engine.entity_handle_read::<Account>().unwrap();
+if let Some(version) = accounts.last_version(&account_id).await? {
+    let account = accounts.read_at_version(&account_id, version).await?;
 }
+let initial = accounts.read_at_version(&account_id, Version::default()).await?;
 ```
+
+For RocksDB, supply its configuration instead of an already-open database:
+
+```rust
+use xori::{EntityConfig, RocksDBBackend, RocksDBConfig, XoriBuilder};
+
+let engine = XoriBuilder::new()
+    .register_entity::<Account>(EntityConfig::default())
+    .build::<RocksDBBackend>(RocksDBConfig::new("./data"))
+    .await?;
+```
+
+The builder passes all registered columns to `Backend::open(config, columns)`.
+RocksDB opens those column families together, using their configured prefix settings.
+Reopening requires the complete existing schema; missing column families produce an
+error. No column discovery from disk is performed. New registered columns are created
+automatically. Keep column registration order stable because column IDs are assigned
+in that order.
+
+Custom backends implement `Backend::Config` and `Backend::open` in addition to the
+storage operations. `DagState::new(builder, config)` registers its internal columns
+before opening the backend as well.
 
 ## Core Concepts
 
