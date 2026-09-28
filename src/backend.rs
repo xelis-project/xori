@@ -57,7 +57,7 @@ pub trait Backend {
 
     /// Atomically apply serialized changes across columns.
     /// An error must leave every column unchanged.
-    fn write_batch<'a, I: Iterator<Item = (&'a Column, &'a ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;
+    fn write_batch<'a, I: Iterator<Item = (&'a Column, ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;
 
     /// Read data at the latest version
     fn read<K: Serializable + Send + Sync>(&self, column: &Column, key: K) -> impl Future<Output = Result<Option<Self::RawBytes>, BackendError<Self::Error>>> + Send;

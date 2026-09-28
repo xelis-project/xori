@@ -199,7 +199,7 @@ impl Backend for RocksDBBackend {
         Ok(())
     }
 
-    async fn write_batch<'a, I: Iterator<Item = (&'a Column, &'a ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> Result<(), BackendError<Self::Error>> {
+    async fn write_batch<'a, I: Iterator<Item = (&'a Column, ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> Result<(), BackendError<Self::Error>> {
         let mut batch = WriteBatch::default();
         for (column, changes) in changes {
             let cf = self.db.cf_handle(column.name())

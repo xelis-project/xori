@@ -146,16 +146,16 @@ impl Backend for MemoryBackend {
         Ok(())
     }
 
-    async fn write_batch<'a, I: Iterator<Item = (&'a Column, &'a ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> Result<(), BackendError<Self::Error>> {
+    async fn write_batch<'a, I: Iterator<Item = (&'a Column, ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> Result<(), BackendError<Self::Error>> {
         for (column, changes) in changes {
             let cf = self.store.columns.entry(column.id()).or_default();
-            for (key, value) in &changes.entries {
+            for (key, value) in changes.entries() {
                 match value {
                     Some(value) => {
-                        cf.insert(key.clone(), value.clone());
+                        cf.insert(key, value);
                     }
                     None => {
-                        cf.remove(key);
+                        cf.remove(&key);
                     }
                 }
             }

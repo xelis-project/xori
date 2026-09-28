@@ -56,8 +56,8 @@ impl Changes {
 
 impl ColumnChanges {
     /// Pending puts and deletions. `None` represents a deletion.
-    pub fn entries(&self) -> impl Iterator<Item = (&Bytes, Option<&Bytes>)> {
-        self.entries.iter().map(|(key, value)| (key, value.as_ref()))
+    pub fn entries(self) -> impl Iterator<Item = (Bytes, Option<Bytes>)> {
+        self.entries.into_iter()
     }
 
     /// Get the value for a key in this column snapshot

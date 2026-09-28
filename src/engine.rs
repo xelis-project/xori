@@ -29,9 +29,9 @@ impl<B: Backend> XoriBackend<B> {
 
     /// Apply a snapshot of changes to the backend, writing all modified entries and deletions
     pub async fn apply_changes(&mut self, changes: Changes) -> XoriResult<(), B::Error> {
-        let iterator = changes.columns.iter()
+        let iterator = changes.columns.into_iter()
             .map(|(column_id, column_changes)| {
-                let column = self.columns.get(column_id)
+                let column = self.columns.get(&column_id)
                     .expect("Column should exist in the registry"); // SAFETY: no new columns can be created outside of the registry
                 (column, column_changes)
             });
