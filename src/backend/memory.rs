@@ -1,7 +1,7 @@
 use std::{collections::{BTreeMap, HashMap}, fmt::Display};
 use futures::{stream, Stream};
 use itertools::Either;
-use crate::{Serializable, backend::{BackendError, ColumnId}, engine::{IteratorDirection, IteratorMode}};
+use crate::{Serializable, backend::{BackendError, ColumnId}, changes::ColumnChanges, engine::{IteratorDirection, IteratorMode}};
 use super::{Backend, Column};
 use bytes::Bytes;
 
@@ -143,6 +143,24 @@ impl Backend for MemoryBackend {
 
     async fn flush(&self) -> Result<(), BackendError<Self::Error>> {
         // No-op for memory backend
+        Ok(())
+    }
+
+    async fn write_batch<'a, I: Iterator<Item = (&'a Column, &'a ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> Result<(), BackendError<Self::Error>> {
+        for (column, changes) in changes {
+            let cf = self.store.columns.entry(column.id()).or_default();
+            for (key, value) in &changes.entries {
+                match value {
+                    Some(value) => {
+                        cf.insert(key.clone(), value.clone());
+                    }
+                    None => {
+                        cf.remove(key);
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }

@@ -55,6 +55,11 @@ impl Changes {
 }
 
 impl ColumnChanges {
+    /// Pending puts and deletions. `None` represents a deletion.
+    pub fn entries(&self) -> impl Iterator<Item = (&Bytes, Option<&Bytes>)> {
+        self.entries.iter().map(|(key, value)| (key, value.as_ref()))
+    }
+
     /// Get the value for a key in this column snapshot
     pub fn get<'a, K>(&'a self, key: K) -> EntryState<&'a Bytes>
     where
@@ -133,17 +138,4 @@ impl ColumnChanges {
     pub fn iterator_keys<'a>(&'a self, mode: IteratorMode<'a>) -> impl Iterator<Item = &'a Bytes> + 'a {
         self.iterator(mode).map(|(k, _)| k)
     }
-
-    // /// Get an iterator over the entries in this column snapshot that have keys starting with the given prefix
-    // #[inline]
-    // pub fn iter_prefix<'a, P>(&'a self, prefix: P) -> impl Iterator<Item = (&'a Bytes, Option<&'a Bytes>)> + 'a
-    // where
-    //     P: Into<Bytes>,
-    // {
-    //     let prefix_bytes = prefix.into();
-    //     self.entries.range(prefix_bytes.clone()..)
-    //         .take_while(move |(k, _)| k.starts_with(&prefix_bytes))
-    //         .map(|(k, v)| (k, v.as_ref()))
-    // }
 }
-

@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt::Display, ops::Bound, path::{Path, PathBuf}};
 use futures::{Stream, stream};
-use rocksdb::{ColumnFamilyDescriptor, DB, IteratorMode as RocksIteratorMode, Options, ReadOptions, SliceTransform};
-use crate::{Serializable, SerializedBytes, backend::BackendError, engine::{IteratorDirection, IteratorMode}};
+use rocksdb::{ColumnFamilyDescriptor, DB, IteratorMode as RocksIteratorMode, Options, ReadOptions, SliceTransform, WriteBatch};
+use crate::{Serializable, SerializedBytes, backend::BackendError, changes::ColumnChanges, engine::{IteratorDirection, IteratorMode}};
 use super::{Backend, Column};
 
 pub type RocksDBError = rocksdb::Error;
@@ -197,6 +197,23 @@ impl Backend for RocksDBBackend {
                 .map_err(BackendError::Backend)?;
         }
         Ok(())
+    }
+
+    async fn write_batch<'a, I: Iterator<Item = (&'a Column, &'a ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> Result<(), BackendError<Self::Error>> {
+        let mut batch = WriteBatch::default();
+        for (column, changes) in changes {
+            let cf = self.db.cf_handle(column.name())
+                .ok_or(BackendError::Unsupported)?;
+
+            for (key, value) in changes.entries() {
+                match value {
+                    Some(value) => batch.put_cf(cf, key, value),
+                    None => batch.delete_cf(cf, key),
+                }
+            }
+        }
+
+        self.db.write(batch).map_err(BackendError::Backend)
     }
 }
 

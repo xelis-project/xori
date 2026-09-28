@@ -11,7 +11,7 @@ pub mod rocksdb;
 use futures::Stream;
 use thiserror::Error;
 use std::fmt::Display;
-use crate::{ReaderError, Serializable, WriterError, engine::IteratorMode};
+use crate::{ReaderError, Serializable, WriterError, changes::ColumnChanges, engine::IteratorMode};
 
 pub use memory::MemoryBackend;
 pub use column::{Column, ColumnId, ColumnKind, ColumnInner, ColumnProperties};
@@ -54,6 +54,10 @@ pub trait Backend {
 
     /// Delete a key entirely
     fn delete<K: Serializable + Send + Sync>(&mut self, column: &Column, key: K) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;
+
+    /// Atomically apply serialized changes across columns.
+    /// An error must leave every column unchanged.
+    fn write_batch<'a, I: Iterator<Item = (&'a Column, &'a ColumnChanges)> + Send + 'a>(&mut self, changes: I) -> impl Future<Output = Result<(), BackendError<Self::Error>>> + Send;
 
     /// Read data at the latest version
     fn read<K: Serializable + Send + Sync>(&self, column: &Column, key: K) -> impl Future<Output = Result<Option<Self::RawBytes>, BackendError<Self::Error>>> + Send;

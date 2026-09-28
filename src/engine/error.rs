@@ -22,6 +22,22 @@ pub enum XoriError<T: Display> {
     VersionNotFound,
     #[error("No version available at or before the specified version")]
     NoVersionAvailable,
+    #[error("History key already exists")]
+    HistoryAlreadyExists,
+    #[error("Entity key already changed in this history batch")]
+    HistoryDuplicateChange,
+    #[error("History must be rolled back before newer versions of its keys")]
+    HistoryConflict,
+    #[error("Missing or invalid history chunk")]
+    InvalidHistory,
+    #[error("History chunk limit must be at least 2 bytes")]
+    InvalidHistoryConfig,
+    #[error("History entry exceeds the configured chunk size")]
+    HistoryEntryTooLarge,
+    #[error("Entity is not registered: {0}")]
+    UnknownEntity(&'static str),
+    #[error("Version or key index exhausted")]
+    IndexExhausted,
     #[error("Backend error: {0}")]
     Backend(#[from] BackendError<T>),
 }

@@ -29,17 +29,15 @@ impl<B: Backend> XoriBackend<B> {
 
     /// Apply a snapshot of changes to the backend, writing all modified entries and deletions
     pub async fn apply_changes(&mut self, changes: Changes) -> XoriResult<(), B::Error> {
-        for (column_id, column_changes) in changes.columns {
-            let column = self.columns.get(&column_id)
-                .ok_or_else(|| XoriError::UnknownColumn(column_id))?;
-            for (key, value) in column_changes.entries {
-                match value {
-                    Some(value) => self.backend.write(&column, key.as_ref(), value.as_ref()).await.map_err(XoriError::Backend)?,
-                    None => self.backend.delete(&column, key.as_ref()).await.map_err(XoriError::Backend)?,
-                }
-            }
-        }
-        Ok(())
+        let iterator = changes.columns.iter()
+            .map(|(column_id, column_changes)| {
+                let column = self.columns.get(column_id)
+                    .expect("Column should exist in the registry"); // SAFETY: no new columns can be created outside of the registry
+                (column, column_changes)
+            });
+
+        self.backend.write_batch(iterator).await
+            .map_err(XoriError::Backend)
     }
 
     /// Clear all data from the database
