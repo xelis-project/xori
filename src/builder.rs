@@ -1,6 +1,18 @@
 use std::{borrow::Cow, collections::HashMap, sync::Arc};
 
-use crate::{Backend, Column, Entity, XoriEngine, backend::{ColumnId, ColumnProperties, column::{ColumnInner, ColumnKind}}, engine::{XoriResult, XoriBackend}, entity::KeyIndexColumn};
+use crate::{
+    Backend,
+    Column,
+    Entity,
+    XoriEngine,
+    backend::{
+        ColumnId,
+        ColumnProperties,
+        column::{ColumnInner, ColumnKind}
+    },
+    engine::{XoriResult, XoriBackend},
+    entity::KeyIndexColumn
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct EntityInfo {

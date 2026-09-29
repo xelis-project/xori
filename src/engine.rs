@@ -1,15 +1,21 @@
 mod error;
 mod iterator;
 
-use futures::{Stream, StreamExt};
-
-use crate::builder::EntityInfo;
-use crate::snapshot::Snapshot;
-use crate::{BackendError, EntityReadHandle, Serializable, Changes};
-use crate::backend::{Backend, Column, ColumnId};
-use crate::entity::{Entity, EntityWriteHandle};
 use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
+use futures::{Stream, StreamExt};
+
+use crate::{
+    builder::EntityInfo,
+    changes::EntryState,
+    snapshot::Snapshot,
+    BackendError,
+    EntityReadHandle,
+    Serializable,
+    Changes,
+    backend::{Backend, Column, ColumnId},
+    entity::{Entity, EntityWriteHandle},
+};
 
 pub use error::{XoriError, XoriResult};
 pub use iterator::{IteratorDirection, IteratorMode};
@@ -22,6 +28,23 @@ pub struct XoriBackend<B: Backend> {
 }
 
 impl<B: Backend> XoriBackend<B> {
+    /// Read pending changes before falling back to the backend.
+    pub(crate) async fn read_with_changes<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(
+        &self,
+        changes: &Changes,
+        column: &Column,
+        key: K,
+    ) -> XoriResult<Option<V>, B::Error> {
+        if let Some(changes) = changes.column(column) {
+            match changes.get(key.to_bytes()?) {
+                EntryState::Stored(value) => return Ok(Some(V::from_bytes(value)?)),
+                EntryState::Deleted => return Ok(None),
+                EntryState::Absent => {},
+            }
+        }
+        self.read(column, key).await
+    }
+
     /// Create a new snapshot of the current state of the engine, including pending changes
     pub fn create_snapshot<'a>(&'a self) -> Snapshot<'a, B> {
         Snapshot::new(self, Changes::default())

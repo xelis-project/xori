@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use futures::{Stream, StreamExt, future::{Either, ready}, stream};
 
-use crate::{Backend, Changes, Column, Serializable, XoriError, XoriResult, changes::EntryState, engine::{IteratorMode, XoriBackend}};
+use crate::{Backend, Changes, Column, Serializable, XoriError, XoriResult, engine::{IteratorMode, XoriBackend}};
 
 /// Represents a snapshot of the current state of the engine, including pending changes
 #[derive(Clone)]
@@ -22,15 +22,7 @@ impl<'a, B: Backend> Snapshot<'a, B> {
     /// Read a value from the backend for a given column and key
     #[inline]
     pub async fn read<K: Serializable + Send + Sync, V: Serializable + Send + Sync>(&self, column: &Column, key: K) -> XoriResult<Option<V>, B::Error> {
-        if let Some(column) = self.changes.column(column) {
-            match column.get(key.to_bytes()?) {
-                EntryState::Stored(bytes) => return V::from_bytes(bytes.as_ref()).map(Some).map_err(XoriError::from),
-                EntryState::Deleted => return Ok(None),
-                EntryState::Absent => {}
-            };
-        }
-
-        self.engine.read(column, key).await
+        self.engine.read_with_changes(&self.changes, column, key).await
     }
 
     /// Write a value to the backend for a given column and key
