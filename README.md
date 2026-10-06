@@ -169,6 +169,27 @@ Xori includes a custom serialization framework optimized for versioned storage. 
 - Collections: `Vec<T>`, `Option<T>`
 - References: `&T`, `Cow<T>`
 
+### Writing directly to a sink
+
+`Serializable::write` serializes directly into any `Writable` destination without
+creating an intermediate byte buffer:
+
+```rust
+account.write(&mut sink)?;
+```
+
+`Writable::push` and `extend_bytes` return `Result<(), WriterError>`. Custom
+serializers must propagate these results with `?`. `WriterError` is a Matriochka
+error: sinks can wrap their own error types using `WriterError::new(error)` and
+add optional `.context(...)`. Reader errors also use Matriochka for custom causes
+and expose `.context(...)`. `from_bytes` adds the type and reader offset to
+decoding failures; `to_bytes` adds the type to serialization failures. There are
+no I/O-specific error variants.
+
+A failed write may leave a partial value in the destination. Each sink determines
+its buffering and commit behavior. `pre_allocate` is optional and returns `false`
+by default.
+
 ### Custom Serialization
 
 Implement `Serializable` for custom types:

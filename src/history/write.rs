@@ -257,7 +257,14 @@ impl<'engine, B: Backend> HistoryWriter<'engine, B> {
         {
             journal.insert(
                 Bytes::from(chunk_key(&prefix, index as u64)),
-                Bytes::from(chunk.to_bytes()?.into_vec()),
+                Bytes::from(
+                    chunk
+                        .to_bytes()
+                        .map_err(|error| {
+                            error.context(format!("serializing history chunk {index}"))
+                        })?
+                        .into_vec(),
+                ),
             );
         }
 

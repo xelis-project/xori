@@ -1,5 +1,6 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt::Display};
 
+use matriochka::{Error as ContextError};
 use thiserror::Error;
 
 /// Errors that can occur while reading from a byte slice
@@ -10,14 +11,22 @@ pub enum ReaderError {
     #[error("Data is not serializable")]
     NotSerializable,
     #[error("Requested {requested} bytes but only {available} available")]
-    OutOfBounds {
-        requested: usize,
-        available: usize,
-    },
+    OutOfBounds { requested: usize, available: usize },
     #[error("Failed to convert bytes")]
     ErrorTryInto,
     #[error(transparent)]
-    Any(#[from] anyhow::Error),
+    Any(#[from] ContextError),
+}
+
+impl ReaderError {
+    /// Add diagnostic context while preserving the concrete reader error.
+    pub fn context(self, context: impl Display + Send + Sync + 'static) -> Self {
+        let error = match self {
+            Self::Any(error) => error,
+            error => ContextError::new(error),
+        };
+        Self::Any(error.context(context))
+    }
 }
 
 /// Reader for deserializing entities from a byte slice
@@ -32,7 +41,7 @@ impl<'a> Reader<'a> {
     pub fn new(data: impl Into<Cow<'a, [u8]>>) -> Self {
         Self {
             data: data.into(),
-            total: 0
+            total: 0,
         }
     }
 
@@ -84,7 +93,7 @@ impl<'a> Reader<'a> {
     /// Read a specific number of bytes and return them as a slice
     pub fn read_bytes<T>(&mut self, n: usize) -> Result<T, ReaderError>
     where
-        T: for<'b> TryFrom<&'b [u8]>
+        T: for<'b> TryFrom<&'b [u8]>,
     {
         if n > self.remaining() {
             return Err(ReaderError::OutOfBounds {
@@ -93,15 +102,11 @@ impl<'a> Reader<'a> {
             });
         }
 
-        let result = match self.data[self.total..self.total+n].try_into() {
-            Ok(v) => {
-                Ok(v)
-            },
-            Err(_) => Err(ReaderError::ErrorTryInto)
-        };
+        let result = self.data[self.total..self.total + n].try_into()
+            .map_err(|_| ReaderError::ErrorTryInto.context(format!("trying to convert {} bytes", n)))?;
 
         self.total += n;
-        result
+        Ok(result)
     }
 
     /// Read a specific number of bytes and return them as a slice reference
@@ -113,7 +118,7 @@ impl<'a> Reader<'a> {
             });
         }
 
-        let bytes = &self.data[self.total..self.total+n];
+        let bytes = &self.data[self.total..self.total + n];
         self.total += n;
         Ok(bytes)
     }
@@ -130,5 +135,50 @@ impl<'a> Reader<'a> {
         let bytes = &self.data[self.total..];
         self.total = self.data.len();
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Serializable;
+
+    #[test]
+    fn deserialization_errors_preserve_type_and_offset_context() {
+        // Two u16 values are declared, but only the first is present.
+        let error = Vec::<u16>::from_bytes([2, 0, 1]).unwrap_err();
+        let ReaderError::Any(error) = error else {
+            panic!("expected contextual reader error");
+        };
+
+        assert!(matches!(
+            error.downcast_ref::<ReaderError>(),
+            Some(ReaderError::OutOfBounds {
+                requested: 2,
+                available: 0
+            })
+        ));
+        let diagnostic = format!("{error:#}");
+        assert!(diagnostic.contains("deserializing alloc::vec::Vec<u16> at byte 3"));
+        assert!(diagnostic.contains("Requested 2 bytes but only 0 available"));
+    }
+
+    #[test]
+    fn custom_reader_errors_retain_their_cause_and_context() {
+        #[derive(Debug, thiserror::Error)]
+        #[error("invalid record")]
+        struct InvalidRecord;
+
+        let error =
+            ReaderError::from(ContextError::new(InvalidRecord)).context("reading account metadata");
+        let ReaderError::Any(error) = error else {
+            panic!("expected contextual reader error");
+        };
+
+        assert!(error.downcast_ref::<InvalidRecord>().is_some());
+        assert_eq!(
+            format!("{error:#}"),
+            "reading account metadata: invalid record"
+        );
     }
 }

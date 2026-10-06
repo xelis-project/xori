@@ -65,19 +65,19 @@ impl Serializable for VarUint {
         
         if value <= 0xFC {
             // Single byte for values 0-252
-            writer.push(value as u8);
+            writer.push(value as u8)?;
         } else if value <= 0xFFFF {
             // 0xFD prefix + 2 bytes for u16
-            writer.push(0xFD);
-            writer.extend_bytes(&(value as u16).to_be_bytes());
+            writer.push(0xFD)?;
+            writer.extend_bytes(&(value as u16).to_be_bytes())?;
         } else if value <= 0xFFFFFFFF {
             // 0xFE prefix + 4 bytes for u32
-            writer.push(0xFE);
-            writer.extend_bytes(&(value as u32).to_be_bytes());
+            writer.push(0xFE)?;
+            writer.extend_bytes(&(value as u32).to_be_bytes())?;
         } else {
             // 0xFF prefix + 8 bytes for u64
-            writer.push(0xFF);
-            writer.extend_bytes(&(value as u64).to_be_bytes());
+            writer.push(0xFF)?;
+            writer.extend_bytes(&(value as u64).to_be_bytes())?;
         }
         
         Ok(())

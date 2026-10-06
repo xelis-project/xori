@@ -181,8 +181,7 @@ impl<'a> Serializable for SerializedBytes<'a> {
 
     #[inline]
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        writer.extend_bytes(self.as_ref());
-        Ok(())
+        writer.extend_bytes(self.as_ref())
     }
 
     #[inline]

@@ -126,9 +126,8 @@ struct DagChangeKey<'a> {
 impl Serializable for DagChangeKey<'_> {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         self.column.write(writer)?;
-        writer.extend_bytes(self.entry_key_bytes);
-        writer.extend_bytes(self.data_key_bytes);
-        Ok(())
+        writer.extend_bytes(self.entry_key_bytes)?;
+        writer.extend_bytes(self.data_key_bytes)
     }
 
     fn read(_: &mut Reader) -> Result<Self, ReaderError> {

@@ -10,8 +10,7 @@ macro_rules! impl_serializable_integer {
         $(
             impl Serializable for $ty {
                 fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-                    writer.extend_bytes(&self.to_be_bytes());
-                    Ok(())
+                    writer.extend_bytes(&self.to_be_bytes())
                 }
 
                 fn to_bytes<'a>(&'a self) -> Result<SerializedBytes<'a>, WriterError> {
@@ -35,8 +34,7 @@ impl_serializable_integer!(u16 => 2, u32 => 4, i64 => 8, u64 => 8);
 
 impl Serializable for u8 {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        writer.push(*self);
-        Ok(())
+        writer.push(*self)
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
@@ -84,8 +82,7 @@ impl Serializable for String {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         // Write length as VarInt, then raw UTF-8 bytes
         VarUint(self.len() as u64).write(writer)?;
-        writer.extend_bytes(self.as_bytes());
-        Ok(())
+        writer.extend_bytes(self.as_bytes())
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
@@ -269,8 +266,7 @@ mod tests {
 
 impl<'a> Serializable for &'a [u8] {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        writer.extend_bytes(self);
-        Ok(())
+        writer.extend_bytes(self)
     }
 
     fn read(_: &mut Reader) -> Result<Self, ReaderError> {
@@ -284,8 +280,7 @@ impl<'a> Serializable for &'a [u8] {
 
 impl Serializable for Bytes {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
-        writer.extend_bytes(self.as_ref());
-        Ok(())
+        writer.extend_bytes(self.as_ref())
     }
 
     fn read(reader: &mut Reader) -> Result<Self, ReaderError> {

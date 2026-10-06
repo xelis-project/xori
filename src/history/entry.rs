@@ -47,7 +47,7 @@ impl Serializable for EntryRef<'_> {
     fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
         self.column.write(writer)?;
         VarUint(self.key.len() as u64).write(writer)?;
-        writer.extend_bytes(self.key);
+        writer.extend_bytes(self.key)?;
         self.version.write(writer)
     }
 
