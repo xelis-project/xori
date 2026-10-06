@@ -1,6 +1,6 @@
 use crate::{
-    Backend, Changes, KeyIndex, Reader, ReaderError, Serializable, VarUint, Version, VersionedKey,
-    Writable, WriterError, XoriEngine, XoriError, XoriResult, backend::ColumnId,
+    Backend, Changes, KeyIndex, Readable, Reader, ReaderError, Serializable, VarUint, Version,
+    VersionedKey, Writable, WriterError, XoriEngine, XoriError, XoriResult, backend::ColumnId,
 };
 use bytes::Bytes;
 
@@ -17,11 +17,11 @@ impl Serializable for HistoryEntry {
         self.as_ref().write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let column = ColumnId::read(reader)?;
         let len =
             usize::try_from(VarUint::read(reader)?.0).map_err(|_| ReaderError::UnexpectedValue)?;
-        let key = reader.read_bytes_ref(len)?.to_vec();
+        let key = reader.read_vec(len)?;
         let version = Version::read(reader)?;
         Ok(Self {
             column,
@@ -51,7 +51,7 @@ impl Serializable for EntryRef<'_> {
         self.version.write(writer)
     }
 
-    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
     }
 

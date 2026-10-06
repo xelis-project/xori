@@ -1,4 +1,4 @@
-use crate::{Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
+use crate::{Readable, Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 
 /// Key representation for entities, supporting both raw keys and indexed keys
 #[derive(Debug, Clone)]
@@ -16,7 +16,7 @@ impl Serializable for KeyIndex {
         self.0.write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let value = VarUint::read(reader)?;
         Ok(KeyIndex(value))
     }
@@ -34,7 +34,7 @@ impl<K: Serializable> Serializable for Key<K> {
         }
     }
 
-    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
     }
 

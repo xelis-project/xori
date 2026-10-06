@@ -46,6 +46,7 @@ pub(crate) async fn version<K: Serializable + Send + Sync, B: Backend>(backend: 
 
 #[cfg(test)]
 mod tests {
+    use crate::{Readable, Reader, ReaderError, Writable, WriterError};
     use super::*;
     use crate::{MemoryBackend, VersionedKey, XoriBuilder, builder::EntityConfig};
     use std::cmp::Ordering;
@@ -62,11 +63,11 @@ mod tests {
     }
 
     impl Serializable for TestEntity {
-        fn write<W: crate::Writable>(&self, writer: &mut W) -> std::result::Result<(), crate::WriterError> {
+        fn write<W: Writable>(&self, writer: &mut W) -> Result<(), WriterError> {
             self.value.write(writer)
         }
 
-        fn read(reader: &mut crate::Reader) -> std::result::Result<Self, crate::ReaderError> {
+        fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
             Ok(TestEntity {
                 value: u64::read(reader)?,
             })

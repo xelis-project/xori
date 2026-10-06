@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{Reader, ReaderError, Serializable, Writable, WriterError};
+use super::{Readable, Reader, ReaderError, Serializable, Writable, WriterError};
 
 /// Variable-length integer encoding for usize values
 /// Uses 1, 2, 4, or 8 bytes depending on the value magnitude
@@ -83,7 +83,7 @@ impl Serializable for VarUint {
         Ok(())
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let prefix = reader.next_byte()?;
         match prefix {
             0x00..=0xFC => Ok(Self(prefix as u64)),

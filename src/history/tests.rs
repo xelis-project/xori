@@ -1,7 +1,15 @@
 use super::{chunk::decode_chunk_key, *};
 
 use crate::{
-    BackendError, Entity, EntityConfig, MemoryBackend, Reader, ReaderError, Version, Writable,
+    BackendError,
+    Entity,
+    EntityConfig,
+    MemoryBackend,
+    Readable,
+    Reader,
+    ReaderError,
+    Version,
+    Writable,
     WriterError,
     backend::ColumnId,
     changes::ColumnChanges,
@@ -25,7 +33,7 @@ impl Serializable for Balance {
         self.0.write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         Ok(Self(u64::read(reader)?))
     }
 
@@ -817,7 +825,7 @@ fn packing_does_not_serialize_or_scan_future_chunks() {
             self.entry.write(writer)
         }
 
-        fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+        fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
             Err(ReaderError::NotSerializable)
         }
 

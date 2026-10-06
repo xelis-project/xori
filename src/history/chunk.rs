@@ -1,4 +1,4 @@
-use crate::{Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
+use crate::{Readable, Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 use std::iter::{FusedIterator, Peekable, Take};
 
 use super::HistoryEntry;
@@ -140,7 +140,7 @@ where
         Ok(())
     }
 
-    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
     }
 

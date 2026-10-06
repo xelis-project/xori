@@ -1,6 +1,6 @@
 use std::{borrow::{Borrow, Cow}, cmp::Ordering, fmt, hash::{Hash, Hasher}, sync::Arc};
 use serde::{Deserialize, Serialize};
-use crate::{Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
+use crate::{Readable, Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 
 /// Unique identifier for a column/namespace in the database
 #[derive(Debug, PartialOrd, Ord, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -92,7 +92,7 @@ impl Serializable for ColumnId {
         VarUint::from(self.0).write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let id = VarUint::read(reader)?;
         Ok(ColumnId(id.0))
     }

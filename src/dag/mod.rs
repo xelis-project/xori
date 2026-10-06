@@ -14,7 +14,7 @@ use crate::backend::column::ColumnKind;
 use crate::{SerializedBytes, Changes, XoriBuilder, XoriEngine};
 use crate::backend::{Backend, Column, ColumnId};
 use crate::engine::{IteratorDirection, IteratorMode, XoriBackend};
-use crate::serde::{Reader, ReaderError, Serializable, Writable, WriterError};
+use crate::serde::{Readable, Reader, ReaderError, Serializable, Writable, WriterError};
 
 
 /// A single entry (node) in the DAG.
@@ -71,7 +71,7 @@ impl<K: DagKey, M: DagMetadata> Serializable for DagEntry<K, M> {
         self.metadata.write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let predecessors = Vec::<K>::read(reader)?;
         let metadata = M::read(reader)?;
         Ok(DagEntry { predecessors, metadata })
@@ -130,7 +130,7 @@ impl Serializable for DagChangeKey<'_> {
         writer.extend_bytes(self.data_key_bytes)
     }
 
-    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
     }
 

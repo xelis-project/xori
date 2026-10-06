@@ -33,7 +33,7 @@ xori = "0.1.0"
 ### Define an Entity
 
 ```rust
-use xori::{Entity, Serializable, Reader, ReaderError, Writable, WriterError};
+use xori::{Entity, Serializable, Readable, Reader, ReaderError, Writable, WriterError};
 
 #[derive(Debug, Clone)]
 struct Account {
@@ -53,7 +53,7 @@ impl Serializable for Account {
         self.owner.as_bytes().to_vec().write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let balance = u64::read(reader)?;
         let owner_bytes = Vec::<u8>::read(reader)?;
         let owner = String::from_utf8(owner_bytes)
@@ -190,6 +190,33 @@ A failed write may leave a partial value in the destination. Each sink determine
 its buffering and commit behavior. `pre_allocate` is optional and returns `false`
 by default.
 
+### Reading directly from a source
+
+`Reader<R>` accepts any `Readable` source. Synchronous `std::io::Read` types,
+including files, sockets, and cursors, implement `Readable` automatically:
+
+```rust
+use xori::{Reader, Serializable};
+
+let mut file = std::fs::File::open("account.bin")?;
+let mut reader = Reader::from_source(&mut file);
+let account = Account::read(&mut reader)?;
+```
+
+`Reader::new(bytes)` and `Serializable::from_bytes(bytes)` still support byte
+slices. Slice readers retain `bytes`, `remaining`, `has_more`, `read_bytes_ref`,
+and `read_bytes_left`; these borrowed helpers are specific to slice sources.
+
+Custom sources implement `Readable::read(&mut self, buffer: &mut [u8])`, returning
+the number of bytes read or a `ReaderError`. Zero means EOF. Custom errors can be
+wrapped with Matriochka, without using I/O errors. Partial reads are handled by
+`Reader::read_exact`, and source errors include the consumed byte offset.
+
+Fixed-size values read into stack buffers. Strings and keys read into their final
+owned buffers. `read_remaining_bytes` now returns an owned `Vec<u8>` and consumes
+the source until EOF; use a bounded source for unframed values inside a larger
+stream. Custom serializers must adopt the generic `read<R: Readable>` signature.
+
 ### Custom Serialization
 
 Implement `Serializable` for custom types:
@@ -203,7 +230,7 @@ impl Serializable for MyType {
         Ok(())
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         // Read fields
         let field1 = Type1::read(reader)?;
         let field2 = Type2::read(reader)?;

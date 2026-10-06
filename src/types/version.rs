@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
+use crate::{Readable, Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 
 
 /// Version identifier representing a point in history (e.g., topoheight)
@@ -24,7 +24,7 @@ impl Serializable for Version {
         VarUint(self.0).write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let value = VarUint::read(reader)?;
         Ok(Version(value.0))
     }
@@ -50,7 +50,7 @@ impl<E: Serializable> Serializable for VersionedKey<E> {
         self.version.write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let key = E::read(reader)?;
         let version = Version::read(reader)?;
         Ok(Self { version, key })
@@ -151,8 +151,8 @@ mod tests {
                 self.0.write(writer)
             }
             
-            fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-                Ok(TestKey(u32::read(reader)?))
+            fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
+                u32::read(reader).map(TestKey)
             }
             
             fn size(&self) -> usize {
@@ -216,8 +216,8 @@ mod tests {
                 self.0.write(writer)
             }
             
-            fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-                Ok(Key(u32::read(reader)?))
+            fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
+                u32::read(reader).map(Key)
             }
             
             fn size(&self) -> usize {

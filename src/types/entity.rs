@@ -1,4 +1,4 @@
-use crate::{KeyIndex, Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
+use crate::{KeyIndex, Readable, Reader, ReaderError, Serializable, VarUint, Writable, WriterError};
 
 
 #[derive(Debug, Clone, Default)]
@@ -19,7 +19,7 @@ impl Serializable for EntityMetadata {
         self.keys_count.write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let keys_count = u64::read(reader)?;
         Ok(Self { keys_count })
     }

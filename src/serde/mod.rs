@@ -8,7 +8,7 @@ mod bytes;
 use std::any::type_name;
 
 pub use writer::{Writable, WriterError};
-pub use reader::{Reader, ReaderError};
+pub use reader::{Readable, Reader, ReaderError, SliceSource};
 pub use writable::WritableBytes;
 pub use varint::VarUint;
 pub use bytes::SerializedBytes;
@@ -40,7 +40,7 @@ pub trait Serializable: Sized {
     }
 
     /// Read an instance of the type from a reader
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError>;
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError>;
 
     /// Estimate the size of the serialized entity without actually serializing it
     fn size(&self) -> usize;
@@ -51,7 +51,7 @@ impl<'a, T: Serializable> Serializable for &'a T {
         (*self).write(writer)
     }
 
-    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
     }
 

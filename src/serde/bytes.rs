@@ -2,7 +2,7 @@ use std::{borrow::Borrow, cmp::Ordering, hash::{Hash, Hasher}, ops::Deref};
 
 use bytes::Bytes;
 
-use crate::{Reader, ReaderError, Serializable, Writable, WriterError};
+use crate::{Readable, Reader, ReaderError, Serializable, Writable, WriterError};
 
 #[derive(Debug, Clone)]
 pub enum SerializedBytes<'a> {
@@ -174,7 +174,7 @@ impl<'a> Into<Box<[u8]>> for SerializedBytes<'a> {
 
 impl<'a> Serializable for SerializedBytes<'a> {
     #[inline]
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         reader.read_remaining_bytes()
             .map(|bytes| SerializedBytes::Owned(bytes.into()))
     }

@@ -17,9 +17,10 @@ macro_rules! impl_serializable_integer {
                     Ok(SerializedBytes::Owned(Box::new(self.to_be_bytes())))
                 }
 
-                fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-                    let bytes = reader.read_bytes_ref($size)?;
-                    Ok(<$ty>::from_be_bytes(bytes.try_into().expect(concat!("Failed to read ", stringify!($ty), " from bytes"))))
+                fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
+                    let mut bytes = [0; $size];
+                    reader.read_exact(&mut bytes)?;
+                    Ok(<$ty>::from_be_bytes(bytes))
                 }
 
                 fn size(&self) -> usize {
@@ -37,7 +38,7 @@ impl Serializable for u8 {
         writer.push(*self)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         reader.next_byte()
     }
 
@@ -51,7 +52,7 @@ impl Serializable for bool {
         (*self as u8).write(writer)
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         match u8::read(reader)? {
             0 => Ok(false),
             1 => Ok(true),
@@ -69,7 +70,7 @@ impl Serializable for () {
         Ok(())
     }
 
-    fn read(_reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         Ok(())
     }
 
@@ -85,10 +86,10 @@ impl Serializable for String {
         writer.extend_bytes(self.as_bytes())
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         let len = VarUint::read(reader)?.0 as usize;
-        let bytes = reader.read_bytes_ref(len)?;
-        String::from_utf8(bytes.to_vec()).map_err(|_| ReaderError::UnexpectedValue)
+        let bytes = reader.read_vec(len)?;
+        String::from_utf8(bytes).map_err(|_| ReaderError::UnexpectedValue)
     }
 
     fn size(&self) -> usize {
@@ -108,7 +109,7 @@ impl<'a, T: Serializable + Clone> Serializable for Cow<'a, T> {
     }
 
     #[inline]
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         T::read(reader).map(Cow::Owned)
     }
 
@@ -129,7 +130,7 @@ impl<T: Serializable> Serializable for Option<T> {
         }
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         match u8::read(reader)? {
             0 => Ok(None),
             1 => T::read(reader).map(Some),
@@ -155,7 +156,7 @@ impl<T: Serializable> Serializable for Vec<T> {
         Ok(())
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
         // Read length as VarInt
         let len = VarUint::read(reader)?.value();
 
@@ -269,7 +270,7 @@ impl<'a> Serializable for &'a [u8] {
         writer.extend_bytes(self)
     }
 
-    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
     }
 
@@ -283,8 +284,8 @@ impl Serializable for Bytes {
         writer.extend_bytes(self.as_ref())
     }
 
-    fn read(reader: &mut Reader) -> Result<Self, ReaderError> {
-        Ok(Bytes::copy_from_slice(reader.read_remaining_bytes()?))
+    fn read<R: Readable>(reader: &mut Reader<R>) -> Result<Self, ReaderError> {
+        reader.read_remaining_bytes().map(Bytes::from)
     }
 
     fn to_bytes<'a>(&'a self) -> Result<SerializedBytes<'a>, WriterError> {

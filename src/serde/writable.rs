@@ -1,4 +1,4 @@
-use crate::{SerializedBytes, Reader, ReaderError, Serializable, Writable, WriterError};
+use crate::{SerializedBytes, Readable, Reader, ReaderError, Serializable, Writable, WriterError};
 
 pub struct WritableBytes<T: AsRef<[u8]>>(pub T);
 
@@ -11,7 +11,7 @@ impl<T: AsRef<[u8]>> Serializable for WritableBytes<T> {
         Ok(SerializedBytes::Borrowed(self.0.as_ref()))
     }
 
-    fn read(_: &mut Reader) -> Result<Self, ReaderError> {
+    fn read<R: Readable>(_: &mut Reader<R>) -> Result<Self, ReaderError> {
         Err(ReaderError::NotSerializable)
     }
 
