@@ -257,3 +257,96 @@ Xori automatically tracks entity metadata including the latest version and key i
 - **Temporal Databases**: Query data as it existed at any point in time
 - **Event Sourcing**: Store and replay events with full history
 - **Configuration Management**: Track configuration changes with rollback capability
+
+### Chunked history and reorg rollback
+
+Register one shared `History` column before opening the backend. A history writer
+stages entity versions and automatically records `(column, key, created_version)`
+references. It stores no entity values in the journal. Use one writer batch per
+topoheight, with at most one change to each entity key in that batch:
+
+```rust
+use xori::{EntityConfig, History, HistoryConfig, MemoryBackend, XoriBuilder};
+
+let mut builder = XoriBuilder::new()
+    .register_entity::<Account>(EntityConfig::default());
+let history = History::register(&mut builder, "history", HistoryConfig::default());
+let mut engine = builder.build::<MemoryBackend>(()).await?;
+
+{
+    let mut writer = history.writer(&mut engine)?;
+    writer.entity_handle_write::<Account>().unwrap()
+        .store(42u64, Account { balance: 100, owner: "Alice".into() }).await?;
+    writer.flush(1000u64).await?; // atomically commits data + history
+}
+
+// Remove topoheight 1000 and everything above it, newest first.
+history.rollback_from(&mut engine, 1000u64).await?;
+```
+
+`writer.store(key, entity)` and `writer.store_deleted::<EntityType, _>(key)` are
+also available directly. `last_version` and `read_at_version` see pending writes.
+Dropping a writer discards unflushed changes. A successful `flush(key)` clears the
+pending batch so the writer can be reused; a failed flush retains it for retry.
+Existing history keys are rejected. Repeated entity changes within a batch are
+recorded in operation order, each with its own version.
+An empty flush records an empty history entry.
+
+`HistoryConfig::max_chunk_bytes` defaults to 64 KiB and limits each serialized
+history value, including its framing. References are packed into chunks under
+`{escaped history key}{chunk index}`. The escaping preserves the serialized key's
+ordering and prevents prefix collisions. A single reference too large for the
+configured limit is rejected before staging any changes. Chunking bounds stored
+history values; the complete pending data batch still lives in memory. References
+borrow the staged keys while packing. Flush serializes all journal chunks before
+calling `write_batch`, then commits them together with the entity changes. The
+staged entity changes are retained for retry if the commit fails. The stored
+chunk format is unchanged.
+
+`history.entries(&engine, key)` streams individual references. Creating a stream
+does no database reads; each poll decodes one entry, and another chunk is fetched
+only after the current one is exhausted. Dropping the stream stops further work.
+
+`history.chunks(&engine, key)` returns lazy `HistoryChunk` iterators rather than
+`Vec<HistoryEntry>` lists. Each chunk owns its backend buffer and decodes entries
+on demand. Both chunk fetching and entry decoding can fail. To collect a chunk,
+use `chunk.collect::<Result<Vec<_>, _>>()`; skipping entries also skips their
+validation. For normal entry-by-entry consumption:
+
+```rust
+use futures::TryStreamExt;
+
+let entries = history.entries(&engine, 1000u64)?;
+futures::pin_mut!(entries);
+while let Some(entry) = entries.try_next().await? {
+    // Inspect entry.column, entry.key, and entry.version.
+}
+```
+
+`history.rollback(&mut engine, key)` undoes one complete history key atomically.
+It reads chunks and operations in reverse order, decoding at most one chunk
+into an entry list at a time. It retains the undo changes until every chunk
+has been validated, so a late decoding error cannot cause a partial rollback.
+`rollback_from` commits each history key separately and can resume after an
+error. Supply history keys in chronological byte order (for example `u64`
+topoheights, whose encoding is big endian), and undo newer keys first. Conflicting
+latest versions stop rollback before modifying that history key. Newly created
+entities lose their latest pointer, payload, and key mappings; allocation counters
+remain monotonic.
+
+Only versioned writes through `HistoryWriter` are tracked. Use `store_deleted`
+instead of physically deleting versions that may be needed for rollback. Writes
+through ordinary engine handles remain untracked; do not mix untracked changes
+into state that must be reverted through this journal.
+
+History flush and rollback require `Backend::write_batch`. MemoryBackend and
+RocksDBBackend implement atomic cross-column batches. Custom backends implement
+`write_batch` over an iterator of `(&Column, ColumnChanges)` pairs and can inspect
+puts and deletions through `ColumnChanges::entries()`. All journal serialization
+finishes before the batch is submitted, so serialization errors cannot publish
+partial changes. Atomic batches require memory proportional to their pending
+changes, including the serialized journal chunks.
+
+History `flush` commits a batch; it does not force an SST flush or fsync. RocksDB
+uses its normal WAL/write options. Register the same schema, including history,
+in the same order on reopen.

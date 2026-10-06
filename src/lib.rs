@@ -7,19 +7,23 @@ pub mod builder;
 pub mod changes;
 pub mod dag;
 pub mod snapshot;
+pub mod history;
+
+pub use history::{History, HistoryChunk, HistoryConfig, HistoryEntityWriteHandle, HistoryEntry, HistoryWriter};
 
 pub use backend::{Backend, Column, BackendError, MemoryBackend};
+
 #[cfg(feature = "rocksdb")]
 pub use backend::{RocksDBBackend, RocksDBConfig};
 pub use entity::{Entity, EntityReadHandle};
 pub use engine::{XoriEngine, XoriResult, XoriError};
-use futures::{Stream, future::Either};
 pub use serde::*;
 pub use types::*;
 pub use builder::{XoriBuilder, EntityConfig};
 pub use changes::Changes;
 pub use dag::{DagState, DagEntry, DagEntryBuilder, DagKey, DagError, DagResult};
 
+use futures::{Stream, future::Either};
 use crate::{engine::IteratorMode, snapshot::Snapshot};
 
 /// A wrapper type that can represent either a mutable reference to the engine or a snapshot, allowing for unified read/write operations

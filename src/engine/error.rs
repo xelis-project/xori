@@ -24,8 +24,6 @@ pub enum XoriError<T: Display> {
     NoVersionAvailable,
     #[error("History key already exists")]
     HistoryAlreadyExists,
-    #[error("Entity key already changed in this history batch")]
-    HistoryDuplicateChange,
     #[error("History must be rolled back before newer versions of its keys")]
     HistoryConflict,
     #[error("Missing or invalid history chunk")]
